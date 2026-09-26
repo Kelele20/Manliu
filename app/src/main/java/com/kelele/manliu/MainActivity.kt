@@ -1,8 +1,13 @@
 package com.kelele.manliu
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import androidx.core.view.WindowCompat
+import androidx.core.content.ContextCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +50,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -73,10 +80,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -93,6 +103,7 @@ private val accentSoft = Color(0xFFF7E8DE)
 private val ink = Color(0xFF282B34)
 private val softText = Color(0xFF6D717C)
 private val hairline = Color(0xFFEDE7E0)
+private data class FolderSelection(val uri: Uri, val images: List<FolderImage>)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -103,7 +114,7 @@ class MainActivity : ComponentActivity() {
             isAppearanceLightStatusBars = true
             isAppearanceLightNavigationBars = true
         }
-        val repository = ComicRepository(applicationContext)
+        val repository = ComicRepository.get(applicationContext)
         setContentView(repository)
     }
 
@@ -163,9 +174,19 @@ private fun ComicApp(repository: ComicRepository) {
 
 @Composable
 private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
-    val albums by repository.albums.collectAsState(initial = emptyList())
+    val albums by repository.overviews.collectAsState(initial = emptyList())
+    val archive by ArchiveStatus.progress.collectAsState()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
+    var showLibraryMenu by remember { mutableStateOf(false) }
+    var restoreFile by remember { mutableStateOf<Uri?>(null) }
+    val backupPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri -> uri?.let { ArchiveService.export(context, it) } }
+    val restorePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> restoreFile = uri }
 
     Column(Modifier.fillMaxSize().background(background)) {
         Row(
@@ -187,6 +208,29 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
                 Text("漫流", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("让画面一页页流动", color = softText, style = MaterialTheme.typography.bodySmall)
             }
+            Box {
+                IconButton(onClick = { showLibraryMenu = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "备份和恢复")
+                }
+                DropdownMenu(expanded = showLibraryMenu, onDismissRequest = { showLibraryMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("备份全部图集") },
+                        enabled = albums.isNotEmpty() && archive?.running != true,
+                        onClick = {
+                            showLibraryMenu = false
+                            backupPicker.launch("漫流备份.manliu")
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("恢复漫流备份") },
+                        enabled = archive?.running != true,
+                        onClick = {
+                            showLibraryMenu = false
+                            restorePicker.launch(arrayOf("*/*"))
+                        },
+                    )
+                }
+            }
             Button(
                 onClick = { showCreate = true },
                 shape = RoundedCornerShape(16.dp),
@@ -197,6 +241,8 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
                 Text("新建")
             }
         }
+
+        archive?.let { ArchiveProgressCard(it, context) }
 
         if (albums.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(horizontal = 26.dp), contentAlignment = Alignment.Center) {
@@ -244,8 +290,6 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(albums, key = { it.id }) { album ->
-                    val pages by remember(album.id) { repository.pages(album.id) }
-                        .collectAsState(initial = emptyList())
                     Card(
                         modifier = Modifier.fillMaxWidth().clickable { onOpen(album.id) },
                         colors = CardDefaults.cardColors(containerColor = surface),
@@ -256,9 +300,9 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
                             Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (pages.isNotEmpty()) {
+                            if (album.coverName != null) {
                                 AsyncImage(
-                                    model = repository.imageFile(pages.first()),
+                                    model = repository.imageFile(album.id, album.coverName),
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp)),
@@ -287,11 +331,11 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
                                 )
                                 Spacer(Modifier.height(8.dp))
                                 Text(
-                                    if (pages.isEmpty()) "等待添加图片" else pages.size.toString() + " 张图片",
+                                    if (album.pageCount == 0) "等待添加图片" else album.pageCount.toString() + " 张图片",
                                     color = softText,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
-                                if (pages.isNotEmpty()) {
+                                if (album.pageCount > 0) {
                                     Spacer(Modifier.height(12.dp))
                                     Text(
                                         if (album.progressPage > 0) "继续阅读" else "开始阅读",
@@ -333,6 +377,20 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
             dismissButton = { TextButton(onClick = { showCreate = false }) { Text("取消") } },
         )
     }
+    restoreFile?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { restoreFile = null },
+            title = { Text("恢复备份") },
+            text = { Text("备份中的图集会作为新图集加入，现有图集和图片不会被覆盖。恢复大量图片时请保持足够可用空间。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    restoreFile = null
+                    ArchiveService.restore(context, uri)
+                }) { Text("开始恢复") }
+            },
+            dismissButton = { TextButton(onClick = { restoreFile = null }) { Text("取消") } },
+        )
+    }
 }
 
 @Composable
@@ -345,13 +403,24 @@ private fun AlbumScreen(
 ) {
     val album by remember(albumId) { repository.album(albumId) }.collectAsState(initial = null)
     val pages by remember(albumId) { repository.pages(albumId) }.collectAsState(initial = emptyList())
+    val latestImport by remember(albumId) { repository.latestImport(albumId) }.collectAsState(initial = null)
+    val archive by ArchiveStatus.progress.collectAsState()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
     var folderLoading by remember { mutableStateOf(false) }
-    var folderImages by remember { mutableStateOf<List<FolderImage>?>(null) }
+    var folderSelection by remember { mutableStateOf<FolderSelection?>(null) }
     var showImportSource by remember { mutableStateOf(false) }
     var deletingAlbum by remember { mutableStateOf(false) }
     var deletingPage by remember { mutableStateOf<ComicPage?>(null) }
+    var editingChapter by remember { mutableStateOf<ComicPage?>(null) }
+    var selectingPages by remember { mutableStateOf(false) }
+    var selectedPageIds by remember { mutableStateOf(emptySet<Long>()) }
+    var confirmBatchDelete by remember { mutableStateOf(false) }
+    var deletingBatch by remember { mutableStateOf(false) }
+    val albumBackupPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri -> uri?.let { ArchiveService.export(context, it, albumId) } }
 
     val importSelected: (List<Uri>) -> Unit = { uris ->
         if (uris.isNotEmpty() && !importing) {
@@ -377,6 +446,9 @@ private fun AlbumScreen(
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> importSelected(uris) }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { ImportService.start(context) }
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -384,15 +456,28 @@ private fun AlbumScreen(
             folderLoading = true
             scope.launch {
                 try {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
                     val images = repository.listFolderImages(uri)
                     if (images.isEmpty()) notify("这个文件夹里没有图片")
-                    else folderImages = images
+                    else folderSelection = FolderSelection(uri, images)
                 } catch (_: Exception) {
                     notify("读取文件夹失败，请换一个文件夹重试")
                 } finally {
                     folderLoading = false
                 }
             }
+        }
+    }
+
+    val launchImportService: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            ImportService.start(context)
         }
     }
 
@@ -445,6 +530,14 @@ private fun AlbumScreen(
                         },
                     )
                     DropdownMenuItem(
+                        text = { Text("备份这个图集") },
+                        enabled = pages.isNotEmpty() && archive?.running != true,
+                        onClick = {
+                            showMenu = false
+                            albumBackupPicker.launch("${album?.title ?: "图集"}.manliu")
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("删除图集") },
                         leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                         onClick = {
@@ -477,7 +570,9 @@ private fun AlbumScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (pages.isEmpty()) {
                     Button(
-                        enabled = !importing && !folderLoading,
+                        enabled = !importing && !folderLoading && latestImport?.let {
+                            it.status in setOf("QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
+                        } != true,
                         onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
                     ) {
@@ -490,7 +585,9 @@ private fun AlbumScreen(
                         Text(if ((album?.progressPage ?: 0) > 0) "继续阅读" else "开始阅读")
                     }
                     OutlinedButton(
-                        enabled = !importing && !folderLoading,
+                        enabled = !importing && !folderLoading && latestImport?.let {
+                            it.status in setOf("QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
+                        } != true,
                         onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
                     ) {
@@ -502,13 +599,49 @@ private fun AlbumScreen(
             }
         }
 
+        latestImport?.let { job ->
+            if (job.status != "DONE" || job.failed > 0) {
+                ImportProgressCard(job, repository, onRestart = launchImportService, notify = notify)
+            }
+        }
+        archive?.let { ArchiveProgressCard(it, context) }
+
         Row(
             Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("阅读顺序", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(pages.size.toString() + " 张 · 可排序", color = softText, style = MaterialTheme.typography.bodySmall)
+            Column {
+                Text("阅读顺序", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(pages.size.toString() + " 张 · 可排序", color = softText, style = MaterialTheme.typography.bodySmall)
+            }
+            if (pages.isNotEmpty()) {
+                TextButton(
+                    enabled = latestImport?.status !in setOf("RUNNING", "QUEUED") && !deletingBatch,
+                    onClick = {
+                        selectingPages = !selectingPages
+                        selectedPageIds = emptySet()
+                    },
+                ) { Text(if (selectingPages) "完成" else "批量选择") }
+            }
+        }
+
+        if (selectingPages) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = {
+                    selectedPageIds = if (selectedPageIds.size == pages.size) emptySet()
+                    else pages.map { it.id }.toSet()
+                }) { Text(if (selectedPageIds.size == pages.size) "取消全选" else "全选") }
+                Spacer(Modifier.weight(1f))
+                Text("已选 ${selectedPageIds.size} 张", color = softText, style = MaterialTheme.typography.bodySmall)
+                TextButton(
+                    enabled = selectedPageIds.isNotEmpty() && !deletingBatch,
+                    onClick = { confirmBatchDelete = true },
+                ) { Text("删除所选", color = accent) }
+            }
         }
 
         if (pages.isEmpty()) {
@@ -531,7 +664,12 @@ private fun AlbumScreen(
                 itemsIndexed(pages, key = { _, page -> page.id }) { index, page ->
                     Card(
                         colors = CardDefaults.cardColors(containerColor = surface),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().then(
+                            if (selectingPages) Modifier.clickable {
+                                selectedPageIds = if (page.id in selectedPageIds) selectedPageIds - page.id
+                                else selectedPageIds + page.id
+                            } else Modifier,
+                        ),
                         shape = RoundedCornerShape(18.dp),
                         border = BorderStroke(1.dp, hairline),
                     ) {
@@ -539,6 +677,9 @@ private fun AlbumScreen(
                             Modifier.fillMaxWidth().padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            if (selectingPages) {
+                                Checkbox(checked = page.id in selectedPageIds, onCheckedChange = null)
+                            }
                             AsyncImage(
                                 model = repository.imageFile(page),
                                 contentDescription = "第 " + (index + 1) + " 张图片",
@@ -559,7 +700,10 @@ private fun AlbumScreen(
                                     color = softText,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                page.chapterTitle?.let { title ->
+                                    Text("章节：$title", color = accent, style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (!selectingPages) Row(verticalAlignment = Alignment.CenterVertically) {
                                     TextButton(
                                         enabled = index > 0,
                                         contentPadding = PaddingValues(horizontal = 6.dp),
@@ -570,6 +714,10 @@ private fun AlbumScreen(
                                         contentPadding = PaddingValues(horizontal = 6.dp),
                                         onClick = { scope.launch { repository.movePage(albumId, page.id, 1) } },
                                     ) { Text("下移") }
+                                    TextButton(
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        onClick = { editingChapter = page },
+                                    ) { Text("章节") }
                                     IconButton(onClick = { deletingPage = page }) {
                                         Icon(Icons.Default.Delete, contentDescription = "删除第 " + (index + 1) + " 张")
                                     }
@@ -588,7 +736,7 @@ private fun AlbumScreen(
             title = { Text("添加图片") },
             text = {
                 Column {
-                    Text("需要全选或排序时，选择存放图片的文件夹。")
+                    Text("一万张导入请选图片文件夹，可全选和排序；相册、文件入口仍受系统选择数量限制。")
                     Spacer(Modifier.height(8.dp))
                     Text("Android/data 无法直接选择；可先复制到「下载」内新建的文件夹。", color = softText)
                     Spacer(Modifier.height(6.dp))
@@ -620,13 +768,25 @@ private fun AlbumScreen(
         )
     }
 
-    folderImages?.let { images ->
+    folderSelection?.let { choice ->
         FolderImportDialog(
-            images = images,
-            onDismiss = { folderImages = null },
+            images = choice.images,
+            freeSpace = repository.freeSpace(),
+            onDismiss = { folderSelection = null },
             onImport = { selected ->
-                folderImages = null
-                importSelected(selected)
+                importing = true
+                scope.launch {
+                    try {
+                        repository.createFolderImport(albumId, choice.uri, selected)
+                        folderSelection = null
+                        launchImportService()
+                        notify("已开始导入 ${selected.size} 张图片")
+                    } catch (error: Exception) {
+                        notify(error.message ?: "无法开始导入")
+                    } finally {
+                        importing = false
+                    }
+                }
             },
         )
     }
@@ -662,6 +822,62 @@ private fun AlbumScreen(
             dismissButton = { TextButton(onClick = { deletingPage = null }) { Text("取消") } },
         )
     }
+    editingChapter?.let { page ->
+        var title by remember(page.id) { mutableStateOf(page.chapterTitle ?: "") }
+        AlertDialog(
+            onDismissRequest = { editingChapter = null },
+            title = { Text("设置章节起点") },
+            text = {
+                Column {
+                    Text("第 ${page.position + 1} 页开始新章节")
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it.take(60) },
+                        label = { Text("章节名称") },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = title.isNotBlank(), onClick = {
+                    editingChapter = null
+                    scope.launch { repository.setChapter(page.id, title) }
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    editingChapter = null
+                    if (page.chapterTitle != null) scope.launch { repository.setChapter(page.id, null) }
+                }) { Text(if (page.chapterTitle != null) "移除标记" else "取消") }
+            },
+        )
+    }
+    if (confirmBatchDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmBatchDelete = false },
+            title = { Text("删除所选 ${selectedPageIds.size} 张？") },
+            text = { Text("只删除漫流内的图片副本，手机里的原图不会受影响。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmBatchDelete = false
+                    deletingBatch = true
+                    scope.launch {
+                        try {
+                            repository.deletePages(albumId, selectedPageIds)
+                            notify("已删除 ${selectedPageIds.size} 张")
+                            selectedPageIds = emptySet()
+                            selectingPages = false
+                        } catch (_: Exception) {
+                            notify("批量删除失败，请重试")
+                        } finally {
+                            deletingBatch = false
+                        }
+                    }
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { confirmBatchDelete = false }) { Text("取消") } },
+        )
+    }
 }
 
 private enum class FolderSort(val label: String) {
@@ -673,8 +889,9 @@ private enum class FolderSort(val label: String) {
 @Composable
 private fun FolderImportDialog(
     images: List<FolderImage>,
+    freeSpace: Long,
     onDismiss: () -> Unit,
-    onImport: (List<Uri>) -> Unit,
+    onImport: (List<FolderImage>) -> Unit,
 ) {
     var selection by remember { mutableStateOf(emptySet<Uri>()) }
     var sort by remember { mutableStateOf(FolderSort.NAME_ASC) }
@@ -692,8 +909,11 @@ private fun FolderImportDialog(
             }
         }
     }
-    val batch = sorted.take(100)
+    val batch = sorted.take(10_000)
     val allSelected = batch.all { it.uri in selection }
+    val selectedImages = remember(sorted, selection) { sorted.filter { it.uri in selection } }
+    val selectedBytes = selectedImages.sumOf { it.sizeBytes.coerceAtLeast(0) }
+    val needsSpace = selectedBytes > 0 && selectedBytes + 64L * 1024 * 1024 > freeSpace
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
@@ -708,9 +928,16 @@ private fun FolderImportDialog(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "共 ${images.size} 张 · 已选 ${selection.size} 张 · 每次最多 100 张",
+                "共 ${images.size} 张 · 已选 ${selection.size} 张 · 每次最多 10000 张",
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
                 color = softText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "预计需 ${showSize(selectedBytes)} · 可用 ${showSize(freeSpace)}" +
+                    if (selectedImages.any { it.sizeBytes < 0 }) "（部分大小未知）" else "",
+                modifier = Modifier.padding(horizontal = 18.dp),
+                color = if (needsSpace) accent else softText,
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(
@@ -721,7 +948,7 @@ private fun FolderImportDialog(
                 TextButton(onClick = {
                     selection = if (allSelected) emptySet() else batch.map { it.uri }.toSet()
                 }) {
-                    Text(if (allSelected) "取消全选" else if (images.size > 100) "选前 100 张" else "全选")
+                    Text(if (allSelected) "取消全选" else if (images.size > 10_000) "选前 10000 张" else "全选")
                 }
                 Box {
                     TextButton(onClick = { showSortMenu = true }) { Text(sort.label) }
@@ -745,7 +972,7 @@ private fun FolderImportDialog(
                         Modifier.fillMaxWidth().clickable {
                             selection = when {
                                 checked -> selection - image.uri
-                                selection.size < 100 -> selection + image.uri
+                                selection.size < 10_000 -> selection + image.uri
                                 else -> selection
                             }
                         }.padding(vertical = 4.dp),
@@ -770,18 +997,151 @@ private fun FolderImportDialog(
                 TextButton(onClick = onDismiss) { Text("取消") }
                 Spacer(Modifier.width(8.dp))
                 Button(
-                    enabled = selection.isNotEmpty(),
-                    onClick = { onImport(sorted.filter { it.uri in selection }.map { it.uri }) },
+                    enabled = selection.isNotEmpty() && !needsSpace,
+                    onClick = { onImport(selectedImages) },
                 ) { Text("导入 (${selection.size})") }
             }
         }
     }
 }
 
+private fun showSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
+    else -> "%.0f MB".format(bytes / (1024.0 * 1024))
+}
+
+@Composable
+private fun ArchiveProgressCard(progress: ArchiveProgress, context: android.content.Context) {
+    Column(
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 10.dp)
+            .clip(RoundedCornerShape(18.dp)).background(accentSoft)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(progress.label, fontWeight = FontWeight.SemiBold)
+        if (progress.running) {
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { progress.processed.toFloat() / progress.total.coerceAtLeast(1) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Text(
+            "${progress.processed} / ${progress.total} 张图片",
+            color = softText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        progress.error?.let { Text(it, color = accent, style = MaterialTheme.typography.bodySmall) }
+        TextButton(
+            onClick = {
+                if (progress.running) ArchiveService.cancel(context) else ArchiveStatus.update(null)
+            },
+        ) { Text(if (progress.running) "取消任务" else "关闭") }
+    }
+}
+
+@Composable
+private fun ImportProgressCard(
+    job: ImportJob,
+    repository: ComicRepository,
+    onRestart: () -> Unit,
+    notify: (String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var showFailures by remember(job.id) { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 12.dp)
+            .clip(RoundedCornerShape(18.dp)).background(surface)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(
+            when (job.status) {
+                "RUNNING", "QUEUED" -> "正在导入图片"
+                "PAUSED" -> "导入已暂停"
+                "CANCELLED" -> "导入已取消"
+                else -> "导入完成"
+            },
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(6.dp))
+        LinearProgressIndicator(
+            progress = { job.processed.toFloat() / job.total.coerceAtLeast(1) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "已处理 ${job.processed} / ${job.total} · 成功 ${job.imported} · 失败 ${job.failed}",
+            color = softText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        job.message?.let {
+            Text(it, color = accent, style = MaterialTheme.typography.bodySmall)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (job.status == "RUNNING" || job.status == "QUEUED") {
+                TextButton(onClick = {
+                    scope.launch {
+                        repository.pauseImport(job.id)
+                        notify("导入已暂停，已完成的图片会保留")
+                    }
+                }) { Text("暂停导入") }
+            }
+            if (job.status == "PAUSED" || job.status == "RUNNING") {
+                TextButton(onClick = {
+                    scope.launch {
+                        repository.resumeImport(job.id)
+                        onRestart()
+                    }
+                }) { Text(if (job.status == "PAUSED") "继续导入" else "尝试恢复") }
+            }
+            if (job.status in setOf("RUNNING", "QUEUED", "PAUSED")) {
+                TextButton(onClick = {
+                    scope.launch {
+                        repository.cancelImport(job.id)
+                        notify("已取消；已导入的图片保留，可以开始新任务")
+                    }
+                }) { Text("取消任务") }
+            }
+            if (job.failed > 0) {
+                TextButton(onClick = { showFailures = true }) { Text("失败清单") }
+                if (job.status == "DONE") {
+                    TextButton(onClick = {
+                        scope.launch {
+                            repository.resumeImport(job.id, retryFailures = true)
+                            onRestart()
+                        }
+                    }) { Text("重试失败项") }
+                }
+            }
+        }
+    }
+
+    if (showFailures) {
+        val failed by remember(job.id) { repository.failedImports(job.id) }.collectAsState(initial = emptyList())
+        AlertDialog(
+            onDismissRequest = { showFailures = false },
+            title = { Text("失败图片（${job.failed} 张）") },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                    items(failed, key = { it.id }) { item ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                            Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(item.error ?: "读取失败", color = softText, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showFailures = false }) { Text("关闭") } },
+        )
+    }
+}
+
 @Composable
 private fun ReaderScreen(repository: ComicRepository, albumId: Long, onBack: () -> Unit) {
-    val album by remember(albumId) { repository.album(albumId) }.collectAsState(initial = null)
-    val pages by remember(albumId) { repository.pages(albumId) }.collectAsState(initial = emptyList())
+    var album by remember(albumId) { mutableStateOf<ComicAlbum?>(null) }
+    var pages by remember(albumId) { mutableStateOf(emptyList<ComicPage>()) }
+    LaunchedEffect(albumId) {
+        album = repository.albumSnapshot(albumId)
+        pages = repository.pageSnapshot(albumId)
+    }
     if (album != null && pages.isNotEmpty()) {
         ReaderContent(repository, album!!, pages, onBack)
     } else {
@@ -799,18 +1159,29 @@ private fun ReaderContent(
     pages: List<ComicPage>,
     onBack: () -> Unit,
 ) {
+    val resumeIndex = remember(album.id, pages) {
+        pages.indexOfFirst { it.id == album.progressPageId }
+            .takeIf { it >= 0 } ?: album.progressPage.coerceIn(0, pages.lastIndex)
+    }
     val state = rememberLazyListState(
-        initialFirstVisibleItemIndex = album.progressPage.coerceIn(0, pages.lastIndex),
+        initialFirstVisibleItemIndex = resumeIndex,
         initialFirstVisibleItemScrollOffset = album.progressOffset.coerceAtLeast(0),
     )
     val scope = rememberCoroutineScope()
     var showControls by remember { mutableStateOf(true) }
+    var showJump by remember { mutableStateOf(false) }
+    var showChapters by remember { mutableStateOf(false) }
+    val chapters = remember(pages) {
+        pages.mapIndexedNotNull { index, page ->
+            page.chapterTitle?.let { index to it }
+        }
+    }
     val interaction = remember { MutableInteractionSource() }
     val exit: () -> Unit = {
         val index = state.firstVisibleItemIndex
         val offset = state.firstVisibleItemScrollOffset
         scope.launch {
-            repository.saveProgress(album.id, index, offset)
+            repository.saveProgress(album.id, index, offset, pages.getOrNull(index)?.id ?: 0)
             onBack()
         }
     }
@@ -820,7 +1191,7 @@ private fun ReaderContent(
         snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
             .debounce(500)
-            .collect { (index, offset) -> repository.saveProgress(album.id, index, offset) }
+            .collect { (index, offset) -> repository.saveProgress(album.id, index, offset, pages.getOrNull(index)?.id ?: 0) }
     }
 
     Box(Modifier.fillMaxSize().background(background)) {
@@ -860,14 +1231,68 @@ private fun ReaderContent(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
+                TextButton(onClick = { showChapters = true }) { Text("目录") }
                 Text(
                     (state.firstVisibleItemIndex + 1).toString() + " / " + pages.size,
                     color = accent,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                        .background(accentSoft).padding(horizontal = 10.dp, vertical = 6.dp),
+                        .background(accentSoft).clickable { showJump = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                 )
             }
         }
+    }
+
+    if (showJump) {
+        var target by remember { mutableStateOf((state.firstVisibleItemIndex + 1).toString()) }
+        val pageNumber = target.toIntOrNull()
+        AlertDialog(
+            onDismissRequest = { showJump = false },
+            title = { Text("跳转到第几页？") },
+            text = {
+                OutlinedTextField(
+                    value = target,
+                    onValueChange = { target = it.filter(Char::isDigit).take(6) },
+                    label = { Text("1 ～ ${pages.size}") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = pageNumber != null && pageNumber in 1..pages.size,
+                    onClick = {
+                        showJump = false
+                        scope.launch { state.scrollToItem(pageNumber!! - 1) }
+                    },
+                ) { Text("跳转") }
+            },
+            dismissButton = { TextButton(onClick = { showJump = false }) { Text("取消") } },
+        )
+    }
+    if (showChapters) {
+        AlertDialog(
+            onDismissRequest = { showChapters = false },
+            title = { Text("章节目录") },
+            text = {
+                if (chapters.isEmpty()) {
+                    Text("尚未设置章节。在图集页面点击某张图片的「章节」，可将它标为章节起点。")
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                        items(chapters, key = { it.first }) { (index, title) ->
+                            TextButton(
+                                onClick = {
+                                    showChapters = false
+                                    scope.launch { state.scrollToItem(index) }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("第 ${index + 1} 页 · $title", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showChapters = false }) { Text("关闭") } },
+        )
     }
 }
