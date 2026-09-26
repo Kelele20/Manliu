@@ -1,0 +1,11 @@
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+*.iml
+*.apk
+manliu-dev-key.keystore
+*.keystore
+dist/
+qa/
