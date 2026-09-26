@@ -1,6 +1,7 @@
 package com.kelele.manliu
 
 import android.os.Bundle
+import androidx.core.view.WindowCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -8,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -25,22 +28,32 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -57,7 +70,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -66,14 +81,23 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
-private val background = Color(0xFF111319)
-private val surface = Color(0xFF20232C)
-private val accent = Color(0xFFFFBE72)
-private val softText = Color(0xFFB5B9C4)
+private val background = Color(0xFFFAF8F4)
+private val surface = Color.White
+private val accent = Color(0xFFC96E58)
+private val accentSoft = Color(0xFFF7E8DE)
+private val ink = Color(0xFF282B34)
+private val softText = Color(0xFF6D717C)
+private val hairline = Color(0xFFEDE7E0)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.statusBarColor = android.graphics.Color.rgb(250, 248, 244)
+        window.navigationBarColor = android.graphics.Color.rgb(250, 248, 244)
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
         val repository = ComicRepository(applicationContext)
         setContentView(repository)
     }
@@ -81,11 +105,14 @@ class MainActivity : ComponentActivity() {
     private fun setContentView(repository: ComicRepository) {
         setContent {
             MaterialTheme(
-                colorScheme = darkColorScheme(
+                colorScheme = lightColorScheme(
                     primary = accent,
-                    onPrimary = background,
+                    onPrimary = Color.White,
                     background = background,
                     surface = surface,
+                    onBackground = ink,
+                    onSurface = ink,
+                    surfaceVariant = accentSoft,
                 ),
             ) {
                 ComicApp(repository)
@@ -103,7 +130,7 @@ private fun ComicApp(repository: ComicRepository) {
     BackHandler(enabled = destination == "album") { destination = "library" }
 
     Scaffold(
-        containerColor = if (destination == "reader") Color.Black else background,
+        containerColor = background,
         snackbarHost = { SnackbarHost(notifications) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
@@ -135,49 +162,139 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(background)) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+            Modifier.fillMaxWidth().padding(start = 22.dp, end = 20.dp, top = 24.dp, bottom = 26.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column {
-                Text("漫流", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text("把图片读成一段故事", color = softText)
+            Box(
+                Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(accentSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.manliu_muse),
+                    contentDescription = "漫流少女",
+                    modifier = Modifier.size(55.dp),
+                )
             }
-            Button(onClick = { showCreate = true }) { Text("新建图集") }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("漫流", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("让画面一页页流动", color = softText, style = MaterialTheme.typography.bodySmall)
+            }
+            Button(
+                onClick = { showCreate = true },
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("新建")
+            }
         }
+
         if (albums.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(horizontal = 26.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("还没有图集", style = MaterialTheme.typography.titleLarge)
+                    Box(
+                        Modifier.size(148.dp).clip(RoundedCornerShape(42.dp)).background(accentSoft),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.manliu_muse),
+                            contentDescription = null,
+                            modifier = Modifier.size(140.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(26.dp))
+                    Text("从第一部图集开始", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    Text("新建图集，再导入手机里的图片", color = softText)
-                    Spacer(Modifier.height(20.dp))
-                    Button(onClick = { showCreate = true }) { Text("开始创建") }
+                    Text(
+                        "挑选喜欢的图片，排好顺序，\n就可以一路往下阅读。",
+                        color = softText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Button(
+                        onClick = { showCreate = true },
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
+                    ) { Text("创建图集") }
                 }
             }
         } else {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("我的图集", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(albums.size.toString() + " 部作品", color = softText, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.height(16.dp))
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(albums, key = { it.id }) { album ->
+                    val pages by remember(album.id) { repository.pages(album.id) }
+                        .collectAsState(initial = emptyList())
                     Card(
                         modifier = Modifier.fillMaxWidth().clickable { onOpen(album.id) },
                         colors = CardDefaults.cardColors(containerColor = surface),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(22.dp),
+                        border = BorderStroke(1.dp, hairline),
                     ) {
                         Row(
-                            Modifier.fillMaxWidth().padding(20.dp),
+                            Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("▤", color = accent, style = MaterialTheme.typography.headlineMedium)
+                            if (pages.isNotEmpty()) {
+                                AsyncImage(
+                                    model = repository.imageFile(pages.first()),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp)),
+                                )
+                            } else {
+                                Box(
+                                    Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp))
+                                        .background(accentSoft),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Image(
+                                        painter = painterResource(R.drawable.manliu_muse),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(78.dp),
+                                    )
+                                }
+                            }
                             Spacer(Modifier.width(16.dp))
-                            Column {
-                                Text(album.title, style = MaterialTheme.typography.titleMedium)
-                                Text("点击管理或继续阅读", color = softText)
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    album.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    if (pages.isEmpty()) "等待添加图片" else pages.size.toString() + " 张图片",
+                                    color = softText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                if (pages.isNotEmpty()) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(
+                                        if (album.progressPage > 0) "继续阅读" else "开始阅读",
+                                        color = accent,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
                             }
                         }
                     }
@@ -243,54 +360,126 @@ private fun AlbumScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) { Text("返回") }
-            Text(
-                album?.title ?: "图集",
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleLarge,
-            )
-            TextButton(onClick = { deletingAlbum = true }) { Text("删除图集") }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Button(
-                enabled = !importing,
-                onClick = {
-                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
-            ) { Text(if (importing) "正在导入…" else "添加图片") }
-            Button(
-                enabled = pages.isNotEmpty(),
-                colors = ButtonDefaults.buttonColors(containerColor = surface, contentColor = Color.White),
-                onClick = onRead,
-            ) { Text("开始阅读") }
-        }
-        Text("共 ${pages.size} 张 · 使用上移、下移调整阅读顺序", Modifier.padding(20.dp, 8.dp), color = softText)
+    var showMenu by remember { mutableStateOf(false) }
 
-        if (pages.isEmpty() && !importing) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("添加图片，组成你的第一段条漫", color = softText)
+    Column(Modifier.fillMaxSize().background(background)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回图集列表")
+            }
+            Spacer(Modifier.width(4.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    album?.title ?: "图集",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text("整理你的阅读顺序", color = softText, style = MaterialTheme.typography.bodySmall)
+            }
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "更多选项")
+                }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("删除图集") },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            deletingAlbum = true
+                        },
+                    )
+                }
+            }
+        }
+
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp)
+                .clip(RoundedCornerShape(24.dp)).background(accentSoft)
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+        ) {
+            Text(
+                if (pages.isEmpty()) "给故事加上第一张画面" else "下一页，继续看",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(
+                if (pages.isEmpty()) "从相册选择图片，就能组成连续条漫。"
+                else "已收集 " + pages.size + " 张图片，按顺序向下阅读。",
+                color = softText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (pages.isEmpty()) {
+                    Button(
+                        enabled = !importing,
+                        onClick = {
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (importing) "导入中" else "添加图片")
+                    }
+                } else {
+                    Button(onClick = onRead, shape = RoundedCornerShape(14.dp)) {
+                        Text(if ((album?.progressPage ?: 0) > 0) "继续阅读" else "开始阅读")
+                    }
+                    OutlinedButton(
+                        enabled = !importing,
+                        onClick = {
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (importing) "导入中" else "添加图片")
+                    }
+                }
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("阅读顺序", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(pages.size.toString() + " 张 · 可逐张调整", color = softText, style = MaterialTheme.typography.bodySmall)
+        }
+
+        if (pages.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                if (importing) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = accent)
+                        Spacer(Modifier.height(14.dp))
+                        Text("正在导入图片…", color = softText)
+                    }
+                } else {
+                    Text("图片会按选择顺序排列在这里", color = softText)
+                }
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(pages, key = { it.id }) { page ->
-                    val index = pages.indexOfFirst { it.id == page.id }
+                itemsIndexed(pages, key = { _, page -> page.id }) { index, page ->
                     Card(
                         colors = CardDefaults.cardColors(containerColor = surface),
                         modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        border = BorderStroke(1.dp, hairline),
                     ) {
                         Row(
                             Modifier.fillMaxWidth().padding(10.dp),
@@ -298,24 +487,38 @@ private fun AlbumScreen(
                         ) {
                             AsyncImage(
                                 model = repository.imageFile(page),
-                                contentDescription = page.originalName,
+                                contentDescription = "第 " + (index + 1) + " 张图片",
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(68.dp, 88.dp).clip(RoundedCornerShape(8.dp)),
+                                modifier = Modifier.size(66.dp, 86.dp).clip(RoundedCornerShape(10.dp)),
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("第 ${index + 1} 张", fontWeight = FontWeight.SemiBold)
-                                Text(page.originalName, maxLines = 1, overflow = TextOverflow.Ellipsis, color = softText)
-                                Row {
+                                Text(
+                                    "第 " + (index + 1).toString().padStart(2, '0') + " 页",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    page.originalName,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = softText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     TextButton(
                                         enabled = index > 0,
+                                        contentPadding = PaddingValues(horizontal = 6.dp),
                                         onClick = { scope.launch { repository.movePage(albumId, page.id, -1) } },
                                     ) { Text("上移") }
                                     TextButton(
                                         enabled = index < pages.lastIndex,
+                                        contentPadding = PaddingValues(horizontal = 6.dp),
                                         onClick = { scope.launch { repository.movePage(albumId, page.id, 1) } },
                                     ) { Text("下移") }
-                                    TextButton(onClick = { deletingPage = page }) { Text("删除") }
+                                    IconButton(onClick = { deletingPage = page }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "删除第 " + (index + 1) + " 张")
+                                    }
                                 }
                             }
                         }
@@ -365,7 +568,7 @@ private fun ReaderScreen(repository: ComicRepository, albumId: Long, onBack: () 
     if (album != null && pages.isNotEmpty()) {
         ReaderContent(repository, album!!, pages, onBack)
     } else {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
     }
@@ -403,7 +606,7 @@ private fun ReaderContent(
             .collect { (index, offset) -> repository.saveProgress(album.id, index, offset) }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(background)) {
         LazyColumn(
             state = state,
             modifier = Modifier.fillMaxSize(),
@@ -425,17 +628,28 @@ private fun ReaderContent(
         if (showControls) {
             Row(
                 modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
-                    .background(Color(0xD9111319)).padding(horizontal = 12.dp, vertical = 6.dp),
+                    .background(background.copy(alpha = 0.96f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = exit) { Text("返回") }
+                IconButton(onClick = exit) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回图集")
+                }
                 Text(
                     album.title,
                     Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                 )
-                Text("${state.firstVisibleItemIndex + 1}/${pages.size}", color = softText)
+                Text(
+                    (state.firstVisibleItemIndex + 1).toString() + " / " + pages.size,
+                    color = accent,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                        .background(accentSoft).padding(horizontal = 10.dp, vertical = 6.dp),
+                )
             }
         }
     }
