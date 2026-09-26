@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,6 +42,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -76,6 +78,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
@@ -343,6 +347,8 @@ private fun AlbumScreen(
     val pages by remember(albumId) { repository.pages(albumId) }.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
+    var folderLoading by remember { mutableStateOf(false) }
+    var folderImages by remember { mutableStateOf<List<FolderImage>?>(null) }
     var showImportSource by remember { mutableStateOf(false) }
     var deletingAlbum by remember { mutableStateOf(false) }
     var deletingPage by remember { mutableStateOf<ComicPage?>(null) }
@@ -371,6 +377,24 @@ private fun AlbumScreen(
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> importSelected(uris) }
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            folderLoading = true
+            scope.launch {
+                try {
+                    val images = repository.listFolderImages(uri)
+                    if (images.isEmpty()) notify("这个文件夹里没有图片")
+                    else folderImages = images
+                } catch (_: Exception) {
+                    notify("读取文件夹失败，请换一个文件夹重试")
+                } finally {
+                    folderLoading = false
+                }
+            }
+        }
+    }
 
     var showMenu by remember { mutableStateOf(false) }
 
@@ -398,6 +422,28 @@ private fun AlbumScreen(
                     Icon(Icons.Default.MoreVert, contentDescription = "更多选项")
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("按文件名排序：1 → 9") },
+                        enabled = !importing && pages.size > 1,
+                        onClick = {
+                            showMenu = false
+                            scope.launch {
+                                repository.sortPagesByName(albumId, ascending = true)
+                                notify("已按文件名升序排列")
+                            }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("按文件名排序：9 → 1") },
+                        enabled = !importing && pages.size > 1,
+                        onClick = {
+                            showMenu = false
+                            scope.launch {
+                                repository.sortPagesByName(albumId, ascending = false)
+                                notify("已按文件名降序排列")
+                            }
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text("删除图集") },
                         leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
@@ -431,7 +477,7 @@ private fun AlbumScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (pages.isEmpty()) {
                     Button(
-                        enabled = !importing,
+                        enabled = !importing && !folderLoading,
                         onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
                     ) {
@@ -444,7 +490,7 @@ private fun AlbumScreen(
                         Text(if ((album?.progressPage ?: 0) > 0) "继续阅读" else "开始阅读")
                     }
                     OutlinedButton(
-                        enabled = !importing,
+                        enabled = !importing && !folderLoading,
                         onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
                     ) {
@@ -462,16 +508,16 @@ private fun AlbumScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text("阅读顺序", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(pages.size.toString() + " 张 · 可逐张调整", color = softText, style = MaterialTheme.typography.bodySmall)
+            Text(pages.size.toString() + " 张 · 可排序", color = softText, style = MaterialTheme.typography.bodySmall)
         }
 
         if (pages.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                if (importing) {
+                if (importing || folderLoading) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = accent)
                         Spacer(Modifier.height(14.dp))
-                        Text("正在导入图片…", color = softText)
+                        Text(if (folderLoading) "正在读取文件夹…" else "正在导入图片…", color = softText)
                     }
                 } else {
                     Text("图片会按选择顺序排列在这里", color = softText)
@@ -540,7 +586,23 @@ private fun AlbumScreen(
         AlertDialog(
             onDismissRequest = { showImportSource = false },
             title = { Text("添加图片") },
-            text = { Text("相册里的照片选「相册」；下载、聊天软件或文件夹中的图片选「文件」。可一次选择多张。") },
+            text = {
+                Column {
+                    Text("需要全选或排序时，选择存放图片的文件夹。")
+                    Spacer(Modifier.height(8.dp))
+                    Text("Android/data 无法直接选择；可先复制到「下载」内新建的文件夹。", color = softText)
+                    Spacer(Modifier.height(6.dp))
+                    Text("也可以继续用系统相册或文件选择器多选。", color = softText)
+                    Spacer(Modifier.height(18.dp))
+                    Button(
+                        onClick = {
+                            showImportSource = false
+                            folderPicker.launch(null)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("从文件夹选择 · 全选/排序") }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showImportSource = false
@@ -554,6 +616,17 @@ private fun AlbumScreen(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                     )
                 }) { Text("从相册选择") }
+            },
+        )
+    }
+
+    folderImages?.let { images ->
+        FolderImportDialog(
+            images = images,
+            onDismiss = { folderImages = null },
+            onImport = { selected ->
+                folderImages = null
+                importSelected(selected)
             },
         )
     }
@@ -588,6 +661,120 @@ private fun AlbumScreen(
             },
             dismissButton = { TextButton(onClick = { deletingPage = null }) { Text("取消") } },
         )
+    }
+}
+
+private enum class FolderSort(val label: String) {
+    NAME_ASC("名称升序（1 → 9）"),
+    NAME_DESC("名称降序（9 → 1）"),
+    NEWEST("最近修改优先"),
+}
+
+@Composable
+private fun FolderImportDialog(
+    images: List<FolderImage>,
+    onDismiss: () -> Unit,
+    onImport: (List<Uri>) -> Unit,
+) {
+    var selection by remember { mutableStateOf(emptySet<Uri>()) }
+    var sort by remember { mutableStateOf(FolderSort.NAME_ASC) }
+    var showSortMenu by remember { mutableStateOf(false) }
+    val sorted = remember(images, sort) {
+        images.sortedWith { first, second ->
+            val byName = compareImageNames(first.name, second.name)
+            when (sort) {
+                FolderSort.NAME_ASC -> byName
+                FolderSort.NAME_DESC -> -byName
+                FolderSort.NEWEST -> {
+                    val byTime = second.modifiedAt.compareTo(first.modifiedAt)
+                    if (byTime != 0) byTime else byName
+                }
+            }
+        }
+    }
+    val batch = sorted.take(100)
+    val allSelected = batch.all { it.uri in selection }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.86f)
+                .clip(RoundedCornerShape(24.dp)).background(surface)
+                .padding(vertical = 18.dp),
+        ) {
+            Text(
+                "选择要添加的图片",
+                modifier = Modifier.padding(horizontal = 18.dp),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "共 ${images.size} 张 · 已选 ${selection.size} 张 · 每次最多 100 张",
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
+                color = softText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TextButton(onClick = {
+                    selection = if (allSelected) emptySet() else batch.map { it.uri }.toSet()
+                }) {
+                    Text(if (allSelected) "取消全选" else if (images.size > 100) "选前 100 张" else "全选")
+                }
+                Box {
+                    TextButton(onClick = { showSortMenu = true }) { Text(sort.label) }
+                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                        FolderSort.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                onClick = { sort = option; showSortMenu = false },
+                            )
+                        }
+                    }
+                }
+            }
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+            ) {
+                items(sorted, key = { it.uri.toString() }) { image ->
+                    val checked = image.uri in selection
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            selection = when {
+                                checked -> selection - image.uri
+                                selection.size < 100 -> selection + image.uri
+                                else -> selection
+                            }
+                        }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = checked, onCheckedChange = null)
+                        AsyncImage(
+                            model = image.uri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(image.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) { Text("取消") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    enabled = selection.isNotEmpty(),
+                    onClick = { onImport(sorted.filter { it.uri in selection }.map { it.uri }) },
+                ) { Text("导入 (${selection.size})") }
+            }
+        }
     }
 }
 
