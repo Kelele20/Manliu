@@ -60,9 +60,11 @@ class ComicRepository(private val context: Context) {
     private suspend fun importOne(albumId: Long, uri: Uri) {
         val resolver = context.contentResolver
         val mime = resolver.getType(uri) ?: ""
-        if (!mime.startsWith("image/")) throw IOException("仅支持图片")
-        val extension = MimeTypeMap.getSingleton()
-            .getExtensionFromMimeType(mime)?.lowercase() ?: "img"
+        val originalName = displayName(uri) ?: "图片"
+        val extension = (if (mime.startsWith("image/")) {
+            MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)?.lowercase()
+        } else null) ?: originalName.substringAfterLast('.', "").lowercase()
+            .takeIf { it.matches(Regex("[a-z0-9]{1,8}")) } ?: "img"
         val filename = "${UUID.randomUUID()}.$extension"
         val directory = albumDirectory(albumId).apply { mkdirs() }
         val partial = File(directory, "$filename.part")
@@ -109,7 +111,7 @@ class ComicRepository(private val context: Context) {
                 albumId = albumId,
                 position = dao.nextPosition(albumId),
                 fileName = filename,
-                originalName = displayName(uri) ?: "图片",
+                originalName = originalName,
                 width = width,
                 height = height,
             )

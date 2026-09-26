@@ -1,5 +1,6 @@
 package com.kelele.manliu
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.core.view.WindowCompat
 import androidx.activity.ComponentActivity
@@ -342,23 +343,34 @@ private fun AlbumScreen(
     val pages by remember(albumId) { repository.pages(albumId) }.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
+    var showImportSource by remember { mutableStateOf(false) }
     var deletingAlbum by remember { mutableStateOf(false) }
     var deletingPage by remember { mutableStateOf<ComicPage?>(null) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(100)) { uris ->
-        if (uris.isNotEmpty()) {
+    val importSelected: (List<Uri>) -> Unit = { uris ->
+        if (uris.isNotEmpty() && !importing) {
+            val selected = uris.take(100)
             importing = true
             scope.launch {
                 try {
-                    val result = repository.importImages(albumId, uris)
-                    val suffix = if (result.failed > 0) "，${result.failed} 张导入失败" else ""
-                    notify("已导入 ${result.imported} 张$suffix")
+                    val result = repository.importImages(albumId, selected)
+                    val failed = if (result.failed > 0) "，" + result.failed + " 张导入失败" else ""
+                    val extra = if (uris.size > selected.size) "，其余图片请分批导入" else ""
+                    notify("已导入 " + result.imported + " 张" + failed + extra)
+                } catch (_: Exception) {
+                    notify("导入失败，请重试")
                 } finally {
                     importing = false
                 }
             }
         }
     }
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(100),
+    ) { uris -> importSelected(uris) }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> importSelected(uris) }
 
     var showMenu by remember { mutableStateOf(false) }
 
@@ -410,7 +422,7 @@ private fun AlbumScreen(
             )
             Spacer(Modifier.height(5.dp))
             Text(
-                if (pages.isEmpty()) "从相册选择图片，就能组成连续条漫。"
+                if (pages.isEmpty()) "从相册或文件夹选择图片，组成连续条漫。"
                 else "已收集 " + pages.size + " 张图片，按顺序向下阅读。",
                 color = softText,
                 style = MaterialTheme.typography.bodySmall,
@@ -420,9 +432,7 @@ private fun AlbumScreen(
                 if (pages.isEmpty()) {
                     Button(
                         enabled = !importing,
-                        onClick = {
-                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                        },
+                        onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -435,9 +445,7 @@ private fun AlbumScreen(
                     }
                     OutlinedButton(
                         enabled = !importing,
-                        onClick = {
-                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                        },
+                        onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -526,6 +534,28 @@ private fun AlbumScreen(
                 }
             }
         }
+    }
+
+    if (showImportSource) {
+        AlertDialog(
+            onDismissRequest = { showImportSource = false },
+            title = { Text("添加图片") },
+            text = { Text("相册里的照片选「相册」；下载、聊天软件或文件夹中的图片选「文件」。可一次选择多张。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showImportSource = false
+                    filePicker.launch(arrayOf("image/*"))
+                }) { Text("从文件选择") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImportSource = false
+                    photoPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                }) { Text("从相册选择") }
+            },
+        )
     }
 
     if (deletingAlbum) {
