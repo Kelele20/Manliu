@@ -346,6 +346,10 @@ class ComicRepository private constructor(private val context: Context) {
                 currentIds.toMutableList().apply { add(newIndex, removeAt(oldIndex)) } == orderedIds
             ) { "图片列表已变化，请重试" }
             if (oldIndex == newIndex) return@withTransaction
+            // Older databases may have gaps in position after page deletion.
+            current.forEachIndexed { index, page ->
+                if (page.position != index) dao.changePosition(page.id, index)
+            }
             if (oldIndex > newIndex) dao.shiftPagesDown(albumId, newIndex, oldIndex)
             else dao.shiftPagesUp(albumId, oldIndex, newIndex)
             dao.changePosition(movedId, newIndex)
