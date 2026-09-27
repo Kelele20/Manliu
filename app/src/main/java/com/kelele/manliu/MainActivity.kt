@@ -333,8 +333,7 @@ private fun LibraryScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth()
                             .zIndex(if (dragState.draggingId == album.id) 1f else 0f)
-                            .offset { IntOffset(0, dragState.offsetFor(album.id)) }
-                            .clickable { onOpen(album.id) },
+                            .offset { IntOffset(0, dragState.offsetFor(album.id)) },
                         colors = CardDefaults.cardColors(containerColor = surface),
                         shape = RoundedCornerShape(22.dp),
                         border = BorderStroke(1.dp, hairline),
@@ -343,6 +342,10 @@ private fun LibraryScreen(
                             Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Row(
+                                Modifier.weight(1f).clickable { onOpen(album.id) },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                             if (album.coverName != null) {
                                 AsyncImage(
                                     model = repository.imageFile(album.id, album.coverName),
@@ -390,6 +393,7 @@ private fun LibraryScreen(
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                 }
+                            }
                             }
                             if (shownAlbums.size > 1) DragHandle()
                         }
