@@ -402,7 +402,9 @@ private fun AlbumScreen(
     notify: (String) -> Unit,
 ) {
     val album by remember(albumId) { repository.album(albumId) }.collectAsState(initial = null)
-    val pages by remember(albumId) { repository.pages(albumId) }.collectAsState(initial = emptyList())
+    val loadedPages by remember(albumId) { repository.pages(albumId) }
+        .collectAsState<List<ComicPage>?>(initial = null)
+    val pages = loadedPages ?: emptyList()
     val latestImport by remember(albumId) { repository.latestImport(albumId) }.collectAsState(initial = null)
     val archive by ArchiveStatus.progress.collectAsState()
     val context = LocalContext.current
@@ -482,6 +484,13 @@ private fun AlbumScreen(
     }
 
     var showMenu by remember { mutableStateOf(false) }
+
+    if (album == null || loadedPages == null) {
+        Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = accent)
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize().background(background)) {
         Row(
