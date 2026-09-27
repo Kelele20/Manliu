@@ -52,8 +52,7 @@ class ArchiveManager(private val context: Context, private val repository: Comic
             pages[albumIndex].forEachIndexed { pageIndex, page ->
                 pageArray.put(JSONObject()
                     .put("entry", "a${albumIndex}/p${pageIndex}")
-                    .put("name", page.originalName)
-                    .put("chapter", page.chapterTitle ?: JSONObject.NULL))
+                    .put("name", page.originalName))
             }
             albumArray.put(JSONObject()
                 .put("title", album.title)
@@ -127,9 +126,7 @@ class ArchiveManager(private val context: Context, private val repository: Comic
                         zip.closeEntry()
                         val (width, height) = imageBounds(image)
                         stagedPages.add(StagedPage(
-                            image.name, name,
-                            if (meta.isNull("chapter")) null else meta.getString("chapter").take(60).ifBlank { null },
-                            width, height,
+                            image.name, name, width, height,
                         ))
                         completed++
                         if (completed % 10 == 0 || completed == total) progress(completed, total)
@@ -143,8 +140,11 @@ class ArchiveManager(private val context: Context, private val repository: Comic
                 result
             }
             repository.database.withTransaction {
-                stagedAlbums.forEach { album ->
-                    val newId = repository.dao.addAlbum(ComicAlbum(title = album.title))
+                repository.dao.makeRoomForAlbums(stagedAlbums.size)
+                stagedAlbums.forEachIndexed { albumIndex, album ->
+                    val newId = repository.dao.addAlbum(ComicAlbum(
+                        title = album.title, sortOrder = albumIndex,
+                    ))
                     val target = File(context.filesDir, "albums/$newId")
                     target.parentFile?.mkdirs()
                     if (!album.directory.renameTo(target)) throw IOException("无法保存恢复的图集")
@@ -153,7 +153,6 @@ class ArchiveManager(private val context: Context, private val repository: Comic
                         repository.dao.addPage(ComicPage(
                             albumId = newId, position = index, fileName = page.fileName,
                             originalName = page.originalName, width = page.width, height = page.height,
-                            chapterTitle = page.chapter,
                         ))
                     }
                     if (pageIds.isNotEmpty()) {
@@ -221,8 +220,7 @@ class ArchiveManager(private val context: Context, private val repository: Comic
     }
 
     private data class StagedPage(
-        val fileName: String, val originalName: String, val chapter: String?,
-        val width: Int, val height: Int,
+        val fileName: String, val originalName: String, val width: Int, val height: Int,
     )
     private data class StagedAlbum(
         val title: String, val progress: Int, val offset: Int, val directory: File,

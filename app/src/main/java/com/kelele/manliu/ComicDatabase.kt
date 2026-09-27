@@ -19,6 +19,7 @@ data class ComicAlbum(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val title: String,
     val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
     val progressPage: Int = 0,
     val progressOffset: Int = 0,
     @ColumnInfo(defaultValue = "0") val progressPageId: Long = 0,
@@ -42,6 +43,7 @@ data class ComicPage(
     val originalName: String,
     val width: Int,
     val height: Int,
+    // Kept to read databases created before chapter controls were removed.
     val chapterTitle: String? = null,
     val importItemId: Long? = null,
 )
@@ -98,7 +100,7 @@ data class ImportItem(
 
 @Dao
 interface ComicDao {
-    @Query("SELECT * FROM albums ORDER BY createdAt DESC, id DESC")
+    @Query("SELECT * FROM albums ORDER BY sortOrder ASC, createdAt DESC, id DESC")
     fun observeAlbums(): Flow<List<ComicAlbum>>
 
     @Query("""
@@ -106,7 +108,7 @@ interface ComicDao {
             (SELECT COUNT(*) FROM pages p WHERE p.albumId = a.id) AS pageCount,
             (SELECT p.fileName FROM pages p WHERE p.albumId = a.id
              ORDER BY p.position, p.id LIMIT 1) AS coverName
-        FROM albums a ORDER BY a.createdAt DESC, a.id DESC
+        FROM albums a ORDER BY a.sortOrder ASC, a.createdAt DESC, a.id DESC
     """)
     fun observeOverviews(): Flow<List<AlbumOverview>>
 
@@ -116,11 +118,17 @@ interface ComicDao {
     @Query("SELECT * FROM albums WHERE id = :id LIMIT 1")
     suspend fun findAlbum(id: Long): ComicAlbum?
 
-    @Query("SELECT * FROM albums ORDER BY createdAt DESC, id DESC")
+    @Query("SELECT * FROM albums ORDER BY sortOrder ASC, createdAt DESC, id DESC")
     suspend fun getAlbums(): List<ComicAlbum>
 
     @Insert
     suspend fun addAlbum(album: ComicAlbum): Long
+
+    @Query("UPDATE albums SET sortOrder = sortOrder + :count")
+    suspend fun makeRoomForAlbums(count: Int)
+
+    @Query("UPDATE albums SET sortOrder = :position WHERE id = :id")
+    suspend fun changeAlbumOrder(id: Long, position: Int)
 
     @Query("DELETE FROM albums WHERE id = :id")
     suspend fun removeAlbum(id: Long)
@@ -155,8 +163,11 @@ interface ComicDao {
     @Query("UPDATE pages SET position = :position WHERE id = :id")
     suspend fun changePosition(id: Long, position: Int)
 
-    @Query("UPDATE pages SET chapterTitle = :title WHERE id = :pageId")
-    suspend fun setChapterTitle(pageId: Long, title: String?)
+    @Query("UPDATE pages SET position = position + 1 WHERE albumId = :albumId AND position >= :start AND position < :end")
+    suspend fun shiftPagesDown(albumId: Long, start: Int, end: Int)
+
+    @Query("UPDATE pages SET position = position - 1 WHERE albumId = :albumId AND position > :start AND position <= :end")
+    suspend fun shiftPagesUp(albumId: Long, start: Int, end: Int)
 
     @Insert
     suspend fun addImportJob(job: ImportJob): Long
@@ -206,11 +217,24 @@ interface ComicDao {
 
 @Database(
     entities = [ComicAlbum::class, ComicPage::class, ImportJob::class, ImportItem::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class ComicDatabase : RoomDatabase() {
     abstract fun comicDao(): ComicDao
+}
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE albums ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("""
+            UPDATE albums SET sortOrder = (
+                SELECT COUNT(*) FROM albums AS prior
+                WHERE prior.createdAt > albums.createdAt
+                   OR (prior.createdAt = albums.createdAt AND prior.id > albums.id)
+            )
+        """.trimIndent())
+    }
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {

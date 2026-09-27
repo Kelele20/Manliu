@@ -36,7 +36,7 @@ class ComicRepository private constructor(private val context: Context) {
         context.applicationContext,
         ComicDatabase::class.java,
         "comics.db",
-    ).addMigrations(MIGRATION_1_2).build()
+    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
     internal val dao = database.comicDao()
 
     val albums: Flow<List<ComicAlbum>> = dao.observeAlbums()
@@ -54,7 +54,22 @@ class ComicRepository private constructor(private val context: Context) {
     fun freeSpace(): Long = context.filesDir.usableSpace
 
     suspend fun createAlbum(title: String): Long = withContext(Dispatchers.IO) {
-        dao.addAlbum(ComicAlbum(title = title.trim().take(80)))
+        database.withTransaction {
+            dao.makeRoomForAlbums(1)
+            dao.addAlbum(ComicAlbum(title = title.trim().take(80), sortOrder = 0))
+        }
+    }
+
+    suspend fun reorderAlbums(orderedIds: List<Long>) = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            val current = dao.getAlbums()
+            require(orderedIds.size == current.size &&
+                orderedIds.toSet() == current.map { it.id }.toSet()) { "图集列表已变化，请重试" }
+            val positions = current.associate { it.id to it.sortOrder }
+            orderedIds.forEachIndexed { index, id ->
+                if (positions[id] != index) dao.changeAlbumOrder(id, index)
+            }
+        }
     }
 
     suspend fun deleteAlbum(id: Long) = withContext(Dispatchers.IO) {
@@ -321,17 +336,33 @@ class ComicRepository private constructor(private val context: Context) {
         null
     }
 
-    suspend fun movePage(albumId: Long, pageId: Long, direction: Int) =
-        withContext(Dispatchers.IO) {
-            database.withTransaction {
-                val list = dao.getPages(albumId)
-                val index = list.indexOfFirst { it.id == pageId }
-                val other = index + direction
-                if (index !in list.indices || other !in list.indices) return@withTransaction
-                dao.changePosition(list[index].id, list[other].position)
-                dao.changePosition(list[other].id, list[index].position)
+    suspend fun reorderPage(albumId: Long, movedId: Long, orderedIds: List<Long>) = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            val current = dao.getPages(albumId)
+            val currentIds = current.map { it.id }
+            val oldIndex = currentIds.indexOf(movedId)
+            val newIndex = orderedIds.indexOf(movedId)
+            require(oldIndex >= 0 && newIndex >= 0 && orderedIds.size == currentIds.size &&
+                currentIds.toMutableList().apply { add(newIndex, removeAt(oldIndex)) } == orderedIds
+            ) { "图片列表已变化，请重试" }
+            if (oldIndex == newIndex) return@withTransaction
+            // Older databases may have gaps in position after page deletion.
+            current.forEachIndexed { index, page ->
+                if (page.position != index) dao.changePosition(page.id, index)
+            }
+            if (oldIndex > newIndex) dao.shiftPagesDown(albumId, newIndex, oldIndex)
+            else dao.shiftPagesUp(albumId, oldIndex, newIndex)
+            dao.changePosition(movedId, newIndex)
+
+            val album = dao.findAlbum(albumId) ?: return@withTransaction
+            val readingId = album.progressPageId.takeIf { it != 0L }
+                ?: current.getOrNull(album.progressPage)?.id
+            readingId?.let { id ->
+                val index = orderedIds.indexOf(id)
+                if (index >= 0) dao.saveProgress(albumId, index, album.progressOffset, id)
             }
         }
+    }
 
     suspend fun sortPagesByName(albumId: Long, ascending: Boolean) = withContext(Dispatchers.IO) {
         database.withTransaction {
@@ -353,10 +384,6 @@ class ComicRepository private constructor(private val context: Context) {
                 dao.saveProgress(albumId, newIndex, oldOffset, readingPageId)
             }
         }
-    }
-
-    suspend fun setChapter(pageId: Long, title: String?) = withContext(Dispatchers.IO) {
-        dao.setChapterTitle(pageId, title?.trim()?.take(60)?.ifBlank { null })
     }
 
     suspend fun deletePage(page: ComicPage) = deletePages(page.albumId, setOf(page.id))

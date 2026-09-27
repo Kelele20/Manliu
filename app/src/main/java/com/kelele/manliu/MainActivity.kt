@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -80,6 +81,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -141,6 +144,7 @@ class MainActivity : ComponentActivity() {
 private fun ComicApp(repository: ComicRepository) {
     var destination by rememberSaveable { mutableStateOf("library") }
     var albumId by rememberSaveable { mutableStateOf(0L) }
+    var readerOrigin by rememberSaveable { mutableStateOf("album") }
     val notifications = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     BackHandler(enabled = destination == "album") { destination = "library" }
@@ -151,21 +155,33 @@ private fun ComicApp(repository: ComicRepository) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (destination) {
-                "library" -> LibraryScreen(repository, onOpen = { id ->
-                    albumId = id
-                    destination = "album"
-                })
+                "library" -> LibraryScreen(
+                    repository = repository,
+                    onOpen = { id ->
+                        albumId = id
+                        destination = "album"
+                    },
+                    onRead = { id ->
+                        albumId = id
+                        readerOrigin = "library"
+                        destination = "reader"
+                    },
+                    notify = { message -> scope.launch { notifications.showSnackbar(message) } },
+                )
                 "album" -> key(albumId) {
                     AlbumScreen(
                         repository = repository,
                         albumId = albumId,
                         onBack = { destination = "library" },
-                        onRead = { destination = "reader" },
+                        onRead = {
+                            readerOrigin = "album"
+                            destination = "reader"
+                        },
                         notify = { message -> scope.launch { notifications.showSnackbar(message) } },
                     )
                 }
                 "reader" -> key(albumId) {
-                    ReaderScreen(repository, albumId) { destination = "album" }
+                    ReaderScreen(repository, albumId) { destination = readerOrigin }
                 }
             }
         }
@@ -173,11 +189,21 @@ private fun ComicApp(repository: ComicRepository) {
 }
 
 @Composable
-private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
-    val albums by repository.overviews.collectAsState(initial = emptyList())
+private fun LibraryScreen(
+    repository: ComicRepository,
+    onOpen: (Long) -> Unit,
+    onRead: (Long) -> Unit,
+    notify: (String) -> Unit,
+) {
+    val loadedAlbums by repository.overviews.collectAsState(initial = null)
+    val albums = loadedAlbums ?: emptyList()
     val archive by ArchiveStatus.progress.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val dragState = remember(listState) { DragReorderState(listState) }
+    LaunchedEffect(albums) { dragState.sourceChanged(albums.map { it.id }) }
+    val shownAlbums = dragState.arranged(albums) { it.id }
     var showCreate by remember { mutableStateOf(false) }
     var showLibraryMenu by remember { mutableStateOf(false) }
     var restoreFile by remember { mutableStateOf<Uri?>(null) }
@@ -187,6 +213,13 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
     val restorePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> restoreFile = uri }
+
+    if (loadedAlbums == null) {
+        Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = accent)
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize().background(background)) {
         Row(
@@ -285,13 +318,30 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
             }
             Spacer(Modifier.height(16.dp))
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                state = listState,
+                modifier = Modifier.fillMaxSize().dragReorder(
+                    state = dragState,
+                    displayedIds = shownAlbums.map { it.id },
+                    enabled = shownAlbums.size > 1,
+                    onDrop = { drop ->
+                        scope.launch {
+                            try {
+                                repository.reorderAlbums(drop.orderedIds)
+                            } catch (_: Exception) {
+                                dragState.cancel()
+                                notify("图集顺序保存失败，请重试")
+                            }
+                        }
+                    },
+                ),
                 contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(albums, key = { it.id }) { album ->
+                items(shownAlbums, key = { it.id }) { album ->
                     Card(
-                        modifier = Modifier.fillMaxWidth().clickable { onOpen(album.id) },
+                        modifier = Modifier.fillMaxWidth()
+                            .zIndex(if (dragState.draggingId == album.id) 1f else 0f)
+                            .offset { IntOffset(0, dragState.offsetFor(album.id)) },
                         colors = CardDefaults.cardColors(containerColor = surface),
                         shape = RoundedCornerShape(22.dp),
                         border = BorderStroke(1.dp, hairline),
@@ -300,51 +350,60 @@ private fun LibraryScreen(repository: ComicRepository, onOpen: (Long) -> Unit) {
                             Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (album.coverName != null) {
-                                AsyncImage(
-                                    model = repository.imageFile(album.id, album.coverName),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp)),
-                                )
-                            } else {
-                                Box(
-                                    Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp))
-                                        .background(accentSoft),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Image(
-                                        painter = painterResource(R.drawable.manliu_muse),
+                            Row(
+                                Modifier.weight(1f).clickable { onOpen(album.id) },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (album.coverName != null) {
+                                    AsyncImage(
+                                        model = repository.imageFile(album.id, album.coverName),
                                         contentDescription = null,
-                                        modifier = Modifier.size(78.dp),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp)),
                                     )
+                                } else {
+                                    Box(
+                                        Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp))
+                                            .background(accentSoft),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Image(
+                                            painter = painterResource(R.drawable.manliu_muse),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(78.dp),
+                                        )
+                                    }
                                 }
-                            }
-                            Spacer(Modifier.width(16.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    album.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    if (album.pageCount == 0) "等待添加图片" else album.pageCount.toString() + " 张图片",
-                                    color = softText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                if (album.pageCount > 0) {
-                                    Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.width(16.dp))
+                                Column(Modifier.weight(1f)) {
                                     Text(
-                                        if (album.progressPage > 0) "继续阅读" else "开始阅读",
-                                        color = accent,
-                                        style = MaterialTheme.typography.labelLarge,
+                                        album.title,
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        if (album.pageCount == 0) "等待添加图片" else album.pageCount.toString() + " 张图片",
+                                        color = softText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    if (album.pageCount > 0) {
+                                        Spacer(Modifier.height(12.dp))
+                                        Text(
+                                            if (album.progressPage > 0) "继续阅读" else "开始阅读",
+                                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                                .clickable { onRead(album.id) }
+                                                .padding(vertical = 4.dp),
+                                            color = accent,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
                                 }
                             }
+                            if (shownAlbums.size > 1) DragHandle()
                         }
                     }
                 }
@@ -402,22 +461,31 @@ private fun AlbumScreen(
     notify: (String) -> Unit,
 ) {
     val album by remember(albumId) { repository.album(albumId) }.collectAsState(initial = null)
-    val pages by remember(albumId) { repository.pages(albumId) }.collectAsState(initial = emptyList())
+    val loadedPages by remember(albumId) { repository.pages(albumId) }
+        .collectAsState(initial = null)
+    val pages = loadedPages ?: emptyList()
     val latestImport by remember(albumId) { repository.latestImport(albumId) }.collectAsState(initial = null)
     val archive by ArchiveStatus.progress.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val dragState = remember(listState) { DragReorderState(listState) }
+    LaunchedEffect(pages) { dragState.sourceChanged(pages.map { it.id }) }
+    val shownPages = dragState.arranged(pages) { it.id }
     var importing by remember { mutableStateOf(false) }
     var folderLoading by remember { mutableStateOf(false) }
     var folderSelection by remember { mutableStateOf<FolderSelection?>(null) }
     var showImportSource by remember { mutableStateOf(false) }
     var deletingAlbum by remember { mutableStateOf(false) }
     var deletingPage by remember { mutableStateOf<ComicPage?>(null) }
-    var editingChapter by remember { mutableStateOf<ComicPage?>(null) }
     var selectingPages by remember { mutableStateOf(false) }
     var selectedPageIds by remember { mutableStateOf(emptySet<Long>()) }
     var confirmBatchDelete by remember { mutableStateOf(false) }
     var deletingBatch by remember { mutableStateOf(false) }
+    val pageDragEnabled = shownPages.size > 1 && !importing && !selectingPages && !deletingBatch &&
+        latestImport?.let {
+            it.status in setOf("QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
+        } != true
     val albumBackupPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri -> uri?.let { ArchiveService.export(context, it, albumId) } }
@@ -483,6 +551,13 @@ private fun AlbumScreen(
 
     var showMenu by remember { mutableStateOf(false) }
 
+    if (album == null || loadedPages == null) {
+        Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = accent)
+        }
+        return
+    }
+
     Column(Modifier.fillMaxSize().background(background)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
@@ -509,7 +584,7 @@ private fun AlbumScreen(
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
                         text = { Text("按文件名排序：1 → 9") },
-                        enabled = !importing && pages.size > 1,
+                        enabled = !importing && !dragState.waitingForSave && pages.size > 1,
                         onClick = {
                             showMenu = false
                             scope.launch {
@@ -520,7 +595,7 @@ private fun AlbumScreen(
                     )
                     DropdownMenuItem(
                         text = { Text("按文件名排序：9 → 1") },
-                        enabled = !importing && pages.size > 1,
+                        enabled = !importing && !dragState.waitingForSave && pages.size > 1,
                         onClick = {
                             showMenu = false
                             scope.launch {
@@ -658,18 +733,37 @@ private fun AlbumScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
+                modifier = Modifier.dragReorder(
+                    state = dragState,
+                    displayedIds = shownPages.map { it.id },
+                    enabled = pageDragEnabled,
+                    onDrop = { drop ->
+                        scope.launch {
+                            try {
+                                repository.reorderPage(albumId, drop.movedId, drop.orderedIds)
+                            } catch (_: Exception) {
+                                dragState.cancel()
+                                notify("图片顺序保存失败，请重试")
+                            }
+                        }
+                    },
+                ),
                 contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                itemsIndexed(pages, key = { _, page -> page.id }) { index, page ->
+                itemsIndexed(shownPages, key = { _, page -> page.id }) { index, page ->
                     Card(
                         colors = CardDefaults.cardColors(containerColor = surface),
-                        modifier = Modifier.fillMaxWidth().then(
-                            if (selectingPages) Modifier.clickable {
-                                selectedPageIds = if (page.id in selectedPageIds) selectedPageIds - page.id
-                                else selectedPageIds + page.id
-                            } else Modifier,
-                        ),
+                        modifier = Modifier.fillMaxWidth()
+                            .zIndex(if (dragState.draggingId == page.id) 1f else 0f)
+                            .offset { IntOffset(0, dragState.offsetFor(page.id)) }
+                            .then(
+                                if (selectingPages) Modifier.clickable {
+                                    selectedPageIds = if (page.id in selectedPageIds) selectedPageIds - page.id
+                                    else selectedPageIds + page.id
+                                } else Modifier,
+                            ),
                         shape = RoundedCornerShape(18.dp),
                         border = BorderStroke(1.dp, hairline),
                     ) {
@@ -700,29 +794,13 @@ private fun AlbumScreen(
                                     color = softText,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
-                                page.chapterTitle?.let { title ->
-                                    Text("章节：$title", color = accent, style = MaterialTheme.typography.bodySmall)
-                                }
                                 if (!selectingPages) Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(
-                                        enabled = index > 0,
-                                        contentPadding = PaddingValues(horizontal = 6.dp),
-                                        onClick = { scope.launch { repository.movePage(albumId, page.id, -1) } },
-                                    ) { Text("上移") }
-                                    TextButton(
-                                        enabled = index < pages.lastIndex,
-                                        contentPadding = PaddingValues(horizontal = 6.dp),
-                                        onClick = { scope.launch { repository.movePage(albumId, page.id, 1) } },
-                                    ) { Text("下移") }
-                                    TextButton(
-                                        contentPadding = PaddingValues(horizontal = 4.dp),
-                                        onClick = { editingChapter = page },
-                                    ) { Text("章节") }
                                     IconButton(onClick = { deletingPage = page }) {
                                         Icon(Icons.Default.Delete, contentDescription = "删除第 " + (index + 1) + " 张")
                                     }
                                 }
                             }
+                            if (pageDragEnabled) DragHandle()
                         }
                     }
                 }
@@ -820,36 +898,6 @@ private fun AlbumScreen(
                 }) { Text("删除") }
             },
             dismissButton = { TextButton(onClick = { deletingPage = null }) { Text("取消") } },
-        )
-    }
-    editingChapter?.let { page ->
-        var title by remember(page.id) { mutableStateOf(page.chapterTitle ?: "") }
-        AlertDialog(
-            onDismissRequest = { editingChapter = null },
-            title = { Text("设置章节起点") },
-            text = {
-                Column {
-                    Text("第 ${page.position + 1} 页开始新章节")
-                    OutlinedTextField(
-                        value = title,
-                        onValueChange = { title = it.take(60) },
-                        label = { Text("章节名称") },
-                        singleLine = true,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = title.isNotBlank(), onClick = {
-                    editingChapter = null
-                    scope.launch { repository.setChapter(page.id, title) }
-                }) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    editingChapter = null
-                    if (page.chapterTitle != null) scope.launch { repository.setChapter(page.id, null) }
-                }) { Text(if (page.chapterTitle != null) "移除标记" else "取消") }
-            },
         )
     }
     if (confirmBatchDelete) {
@@ -1170,12 +1218,6 @@ private fun ReaderContent(
     val scope = rememberCoroutineScope()
     var showControls by remember { mutableStateOf(true) }
     var showJump by remember { mutableStateOf(false) }
-    var showChapters by remember { mutableStateOf(false) }
-    val chapters = remember(pages) {
-        pages.mapIndexedNotNull { index, page ->
-            page.chapterTitle?.let { index to it }
-        }
-    }
     val interaction = remember { MutableInteractionSource() }
     val exit: () -> Unit = {
         val index = state.firstVisibleItemIndex
@@ -1231,7 +1273,6 @@ private fun ReaderContent(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                TextButton(onClick = { showChapters = true }) { Text("目录") }
                 Text(
                     (state.firstVisibleItemIndex + 1).toString() + " / " + pages.size,
                     color = accent,
@@ -1269,30 +1310,6 @@ private fun ReaderContent(
                 ) { Text("跳转") }
             },
             dismissButton = { TextButton(onClick = { showJump = false }) { Text("取消") } },
-        )
-    }
-    if (showChapters) {
-        AlertDialog(
-            onDismissRequest = { showChapters = false },
-            title = { Text("章节目录") },
-            text = {
-                if (chapters.isEmpty()) {
-                    Text("尚未设置章节。在图集页面点击某张图片的「章节」，可将它标为章节起点。")
-                } else {
-                    LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                        items(chapters, key = { it.first }) { (index, title) ->
-                            TextButton(
-                                onClick = {
-                                    showChapters = false
-                                    scope.launch { state.scrollToItem(index) }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("第 ${index + 1} 页 · $title", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showChapters = false }) { Text("关闭") } },
         )
     }
 }
