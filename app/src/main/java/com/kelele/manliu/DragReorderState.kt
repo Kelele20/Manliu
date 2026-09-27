@@ -1,6 +1,5 @@
 package com.kelele.manliu
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyListState
@@ -162,7 +161,7 @@ internal fun Modifier.dragReorder(
 @Composable
 internal fun DragHandle() {
     Box(
-        Modifier.size(48.dp).clickable { }.semantics { contentDescription = "长按拖动排序" },
+        Modifier.size(48.dp).semantics { contentDescription = "长按拖动排序" },
         contentAlignment = Alignment.Center,
     ) {
         Text("≡", style = MaterialTheme.typography.headlineSmall)
