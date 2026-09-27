@@ -31,6 +31,7 @@ internal class DragReorderState(internal val listState: LazyListState) {
     private var order by mutableStateOf<List<Long>?>(null)
     var draggingId by mutableStateOf<Long?>(null)
         private set
+    val waitingForSave: Boolean get() = order != null && draggingId == null
     private var dragTop by mutableFloatStateOf(0f)
     private var draggedHeight = 0
     private var originalOrder = emptyList<Long>()
@@ -52,6 +53,7 @@ internal class DragReorderState(internal val listState: LazyListState) {
     }
 
     fun start(id: Long, displayedIds: List<Long>) {
+        if (waitingForSave) return
         val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return
         if (displayedIds.size < 2) return
         originalOrder = displayedIds
@@ -132,7 +134,7 @@ internal fun Modifier.dragReorder(
     val edgePx = with(LocalDensity.current) { 80.dp.toPx() }
     val handlePx = with(LocalDensity.current) { 84.dp.toPx() }
     LaunchedEffect(state.draggingId, enabled) {
-        if (!enabled) state.cancel()
+        if (!enabled && state.draggingId != null) state.cancel()
         else if (state.draggingId != null) state.autoScroll(edgePx)
     }
     if (!enabled) return this
