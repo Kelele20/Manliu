@@ -13,8 +13,8 @@ android {
         applicationId = "com.kelele.manliu"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.3.2"
+        versionCode = 8
+        versionName = "0.3.3"
     }
 
     signingConfigs {
@@ -64,4 +64,5 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
 }

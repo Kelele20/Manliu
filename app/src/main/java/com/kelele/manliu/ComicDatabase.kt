@@ -148,6 +148,22 @@ interface ComicDao {
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM pages WHERE albumId = :albumId")
     suspend fun nextPosition(albumId: Long): Int
 
+    @Query("""SELECT p.position FROM pages p JOIN import_items i ON p.importItemId = i.id
+        WHERE i.taskId = :taskId AND i.sequence > :sequence
+        ORDER BY i.sequence ASC LIMIT 1""")
+    suspend fun nextImportedPosition(taskId: Long, sequence: Int): Int?
+
+    @Query("""SELECT p.position FROM pages p JOIN import_items i ON p.importItemId = i.id
+        WHERE i.taskId = :taskId AND i.sequence < :sequence
+        ORDER BY i.sequence DESC LIMIT 1""")
+    suspend fun previousImportedPosition(taskId: Long, sequence: Int): Int?
+
+    @Query("UPDATE pages SET position = position + 1 WHERE albumId = :albumId AND position >= :position")
+    suspend fun makeRoomForPage(albumId: Long, position: Int)
+
+    @Query("UPDATE albums SET progressPage = progressPage + 1 WHERE id = :albumId AND progressPage >= :position")
+    suspend fun shiftReadingPositionAfterInsert(albumId: Long, position: Int)
+
     @Insert
     suspend fun addPage(page: ComicPage): Long
 
@@ -181,14 +197,26 @@ interface ComicDao {
     @Query("SELECT * FROM import_jobs WHERE id = :id LIMIT 1")
     suspend fun findImportJob(id: Long): ImportJob?
 
-    @Query("SELECT * FROM import_jobs WHERE albumId = :albumId AND status IN ('QUEUED', 'RUNNING', 'PAUSED') AND processed < total ORDER BY id DESC LIMIT 1")
+    @Query("SELECT folderUri FROM import_jobs WHERE folderUri LIKE 'staged:%'")
+    suspend fun stagedImportSources(): List<String>
+
+    @Query("SELECT * FROM import_jobs WHERE albumId = :albumId AND status IN ('PREPARING', 'QUEUED', 'RUNNING', 'PAUSED') AND processed < total ORDER BY id DESC LIMIT 1")
     suspend fun unfinishedImport(albumId: Long): ImportJob?
+
+    @Query("SELECT * FROM import_jobs WHERE status = 'PREPARING' ORDER BY id LIMIT 1")
+    suspend fun nextPreparingImport(): ImportJob?
 
     @Query("SELECT * FROM import_jobs WHERE status IN ('QUEUED', 'RUNNING') ORDER BY id LIMIT 1")
     suspend fun nextQueuedImport(): ImportJob?
 
     @Query("SELECT * FROM import_items WHERE taskId = :taskId AND status = 'PENDING' ORDER BY sequence LIMIT 1")
     suspend fun nextPendingItem(taskId: Long): ImportItem?
+
+    @Query("SELECT * FROM import_items WHERE taskId = :taskId AND status = 'PENDING' ORDER BY sequence")
+    suspend fun pendingItems(taskId: Long): List<ImportItem>
+
+    @Query("UPDATE import_items SET uri = :uri, sizeBytes = :sizeBytes WHERE id = :itemId")
+    suspend fun updateImportItemSource(itemId: Long, uri: String, sizeBytes: Long)
 
     @Query("SELECT * FROM import_items WHERE taskId = :taskId AND status = 'FAILED' ORDER BY sequence")
     fun observeFailedItems(taskId: Long): Flow<List<ImportItem>>
@@ -205,7 +233,25 @@ interface ComicDao {
     @Query("UPDATE import_jobs SET status = :status, message = :message, updatedAt = :now WHERE id = :taskId")
     suspend fun setImportState(taskId: Long, status: String, message: String?, now: Long = System.currentTimeMillis())
 
-    @Query("UPDATE import_jobs SET status = 'PAUSED', message = :message WHERE status = 'RUNNING'")
+    @Query("UPDATE import_jobs SET status = 'RUNNING', message = NULL WHERE id = :taskId AND status IN ('QUEUED', 'RUNNING')")
+    suspend fun claimImportJob(taskId: Long): Int
+
+    @Query("UPDATE import_jobs SET status = 'QUEUED', message = NULL WHERE id = :taskId AND status = 'PREPARING'")
+    suspend fun finishPreparing(taskId: Long): Int
+
+    @Query("UPDATE import_jobs SET status = 'DONE', message = :message WHERE id = :taskId AND status = 'RUNNING'")
+    suspend fun completeRunningImport(taskId: Long, message: String?): Int
+
+    @Query("UPDATE import_jobs SET status = 'PAUSED', message = :message WHERE id = :taskId AND status IN ('PREPARING', 'QUEUED', 'RUNNING')")
+    suspend fun pauseActiveImport(taskId: Long, message: String): Int
+
+    @Query("UPDATE import_jobs SET status = 'CANCELLED', message = :message WHERE id = :taskId AND status IN ('PREPARING', 'QUEUED', 'RUNNING', 'PAUSED')")
+    suspend fun cancelActiveImport(taskId: Long, message: String): Int
+
+    @Query("UPDATE import_jobs SET message = :message, updatedAt = :now WHERE id = :taskId AND status = 'PREPARING'")
+    suspend fun setImportMessage(taskId: Long, message: String?, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE import_jobs SET status = 'PAUSED', message = :message WHERE status IN ('PREPARING', 'RUNNING')")
     suspend fun pauseRunningImports(message: String)
 
     @Query("UPDATE import_items SET status = 'PENDING', error = NULL WHERE taskId = :taskId AND status = 'FAILED'")

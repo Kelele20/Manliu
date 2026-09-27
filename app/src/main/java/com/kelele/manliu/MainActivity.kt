@@ -73,6 +73,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
@@ -97,7 +98,10 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private val background = Color(0xFFFAF8F4)
 private val surface = Color.White
@@ -147,6 +151,13 @@ private fun ComicApp(repository: ComicRepository) {
     var readerOrigin by rememberSaveable { mutableStateOf("album") }
     val notifications = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val importFeedback by ImportFeedback.message.collectAsState()
+    LaunchedEffect(importFeedback) {
+        importFeedback?.let { message ->
+            notifications.showSnackbar(message)
+            ImportFeedback.clear(message)
+        }
+    }
     BackHandler(enabled = destination == "album") { destination = "library" }
 
     Scaffold(
@@ -484,27 +495,20 @@ private fun AlbumScreen(
     var deletingBatch by remember { mutableStateOf(false) }
     val pageDragEnabled = shownPages.size > 1 && !importing && !selectingPages && !deletingBatch &&
         latestImport?.let {
-            it.status in setOf("QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
+            it.status in setOf("PREPARING", "QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
         } != true
     val albumBackupPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri -> uri?.let { ArchiveService.export(context, it, albumId) } }
 
     val importSelected: (List<Uri>) -> Unit = { uris ->
-        if (uris.isNotEmpty() && !importing) {
-            val selected = uris.take(100)
-            importing = true
-            scope.launch {
-                try {
-                    val result = repository.importImages(albumId, selected)
-                    val failed = if (result.failed > 0) "，" + result.failed + " 张导入失败" else ""
-                    val extra = if (uris.size > selected.size) "，其余图片请分批导入" else ""
-                    notify("已导入 " + result.imported + " 张" + failed + extra)
-                } catch (_: Exception) {
-                    notify("导入失败，请重试")
-                } finally {
-                    importing = false
-                }
+        if (uris.isNotEmpty()) {
+            try {
+                ImportService.startSelected(context, albumId, uris)
+                val extra = if (uris.distinct().size > 100) "，其余图片请分批导入" else ""
+                notify("正在后台准备导入${uris.distinct().take(100).size} 张图片$extra")
+            } catch (error: Exception) {
+                notify(error.message ?: "无法开始导入")
             }
         }
     }
@@ -646,7 +650,7 @@ private fun AlbumScreen(
                 if (pages.isEmpty()) {
                     Button(
                         enabled = !importing && !folderLoading && latestImport?.let {
-                            it.status in setOf("QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
+                            it.status in setOf("PREPARING", "QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
                         } != true,
                         onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
@@ -661,7 +665,7 @@ private fun AlbumScreen(
                     }
                     OutlinedButton(
                         enabled = !importing && !folderLoading && latestImport?.let {
-                            it.status in setOf("QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
+                            it.status in setOf("PREPARING", "QUEUED", "RUNNING", "PAUSED") && it.processed < it.total
                         } != true,
                         onClick = { showImportSource = true },
                         shape = RoundedCornerShape(14.dp),
@@ -692,7 +696,7 @@ private fun AlbumScreen(
             }
             if (pages.isNotEmpty()) {
                 TextButton(
-                    enabled = latestImport?.status !in setOf("RUNNING", "QUEUED") && !deletingBatch,
+                    enabled = latestImport?.status !in setOf("PREPARING", "RUNNING", "QUEUED") && !deletingBatch,
                     onClick = {
                         selectingPages = !selectingPages
                         selectedPageIds = emptySet()
@@ -1103,6 +1107,7 @@ private fun ImportProgressCard(
     ) {
         Text(
             when (job.status) {
+                "PREPARING" -> "正在准备图片"
                 "RUNNING", "QUEUED" -> "正在导入图片"
                 "PAUSED" -> "导入已暂停"
                 "CANCELLED" -> "导入已取消"
@@ -1124,7 +1129,7 @@ private fun ImportProgressCard(
             Text(it, color = accent, style = MaterialTheme.typography.bodySmall)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (job.status == "RUNNING" || job.status == "QUEUED") {
+            if (job.status in setOf("PREPARING", "RUNNING", "QUEUED")) {
                 TextButton(onClick = {
                     scope.launch {
                         repository.pauseImport(job.id)
@@ -1140,7 +1145,7 @@ private fun ImportProgressCard(
                     }
                 }) { Text(if (job.status == "PAUSED") "继续导入" else "尝试恢复") }
             }
-            if (job.status in setOf("RUNNING", "QUEUED", "PAUSED")) {
+            if (job.status in setOf("PREPARING", "RUNNING", "QUEUED", "PAUSED")) {
                 TextButton(onClick = {
                     scope.launch {
                         repository.cancelImport(job.id)
@@ -1184,18 +1189,25 @@ private fun ImportProgressCard(
 
 @Composable
 private fun ReaderScreen(repository: ComicRepository, albumId: Long, onBack: () -> Unit) {
-    var album by remember(albumId) { mutableStateOf<ComicAlbum?>(null) }
-    var pages by remember(albumId) { mutableStateOf(emptyList<ComicPage>()) }
-    LaunchedEffect(albumId) {
-        album = repository.albumSnapshot(albumId)
-        pages = repository.pageSnapshot(albumId)
-    }
-    if (album != null && pages.isNotEmpty()) {
-        ReaderContent(repository, album!!, pages, onBack)
-    } else {
+    val data by remember(albumId) {
+        combine(repository.album(albumId), repository.pages(albumId)) { album, pages -> album to pages }
+    }.collectAsState(initial = null)
+    val loaded = data
+    if (loaded == null) {
         Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
+    } else if (loaded.first == null || loaded.second.isEmpty()) {
+        Column(
+            Modifier.fillMaxSize().background(background),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(if (loaded.first == null) "图集不存在" else "图集里还没有图片")
+            TextButton(onClick = onBack) { Text("返回") }
+        }
+    } else {
+        ReaderContent(repository, loaded.first!!, loaded.second, onBack)
     }
 }
 
@@ -1208,32 +1220,44 @@ private fun ReaderContent(
     onBack: () -> Unit,
 ) {
     val resumeIndex = remember(album.id, pages) {
-        pages.indexOfFirst { it.id == album.progressPageId }
-            .takeIf { it >= 0 } ?: album.progressPage.coerceIn(0, pages.lastIndex)
+        readerResumeIndex(pages, album.progressPageId, album.progressPage)
     }
     val state = rememberLazyListState(
         initialFirstVisibleItemIndex = resumeIndex,
         initialFirstVisibleItemScrollOffset = album.progressOffset.coerceAtLeast(0),
     )
+    val currentPages by rememberUpdatedState(pages)
     val scope = rememberCoroutineScope()
+    val progressMutex = remember { Mutex() }
+    var leaving by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
     var showJump by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
-    val exit: () -> Unit = {
+    val exit: () -> Unit = exit@{
+        if (leaving) return@exit
+        leaving = true
         val index = state.firstVisibleItemIndex
         val offset = state.firstVisibleItemScrollOffset
+        val pageId = readerPageIdAt(currentPages, index)
         scope.launch {
-            repository.saveProgress(album.id, index, offset, pages.getOrNull(index)?.id ?: 0)
+            progressMutex.withLock { repository.saveProgress(album.id, index, offset, pageId) }
             onBack()
         }
     }
     BackHandler(onBack = exit)
 
     LaunchedEffect(album.id, state) {
-        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+        snapshotFlow {
+            val index = state.firstVisibleItemIndex
+            Triple(index, state.firstVisibleItemScrollOffset, readerPageIdAt(currentPages, index))
+        }
             .distinctUntilChanged()
             .debounce(500)
-            .collect { (index, offset) -> repository.saveProgress(album.id, index, offset, pages.getOrNull(index)?.id ?: 0) }
+            .collect { (index, offset, pageId) ->
+                progressMutex.withLock {
+                    if (!leaving) repository.saveProgress(album.id, index, offset, pageId)
+                }
+            }
     }
 
     Box(Modifier.fillMaxSize().background(background)) {
