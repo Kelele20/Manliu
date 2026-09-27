@@ -43,8 +43,10 @@ class ArchiveManager(private val context: Context, private val repository: Comic
         val albums = if (albumId == null) repository.dao.getAlbums()
         else listOfNotNull(repository.dao.findAlbum(albumId))
         if (albums.isEmpty()) throw IOException("没有可备份的图集")
+        ArchiveLimits.validateAlbumCount(albums.size)
         val pages = albums.map { repository.dao.getPages(it.id) }
-        val total = pages.sumOf { it.size }
+        val total = pages.sumOf { it.size.toLong() }
+        ArchiveLimits.validateImageCount(total)
         val manifest = JSONObject().put("format", "manliu-backup").put("version", 1)
         val albumArray = JSONArray()
         albums.forEachIndexed { albumIndex, album ->
@@ -61,24 +63,40 @@ class ArchiveManager(private val context: Context, private val repository: Comic
                 .put("pages", pageArray))
         }
         manifest.put("albums", albumArray)
-        val output = context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("无法写入备份文件")
+        val manifestBytes = manifest.toString().toByteArray(Charsets.UTF_8)
+        val imageFiles = pages.map { albumPages ->
+            albumPages.map { page ->
+                repository.imageFile(page).also { file ->
+                    if (!file.isFile) throw IOException("找不到图片：${page.originalName}")
+                }
+            }
+        }
+        val imageSizes = pages.flatMapIndexed { albumIndex, albumPages ->
+            albumPages.mapIndexed { pageIndex, page ->
+                page.originalName to imageFiles[albumIndex][pageIndex].length()
+            }
+        }
+        val output = ArchiveLimits.openAfterValidation(
+            albums.size, total, manifestBytes.size.toLong(), imageSizes,
+        ) {
+            context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("无法写入备份文件")
+        }
         ZipOutputStream(BufferedOutputStream(output, 128 * 1024)).use { zip ->
             zip.setLevel(Deflater.NO_COMPRESSION)
             zip.putNextEntry(ZipEntry("manifest.json"))
-            zip.write(manifest.toString().toByteArray(Charsets.UTF_8))
+            zip.write(manifestBytes)
             zip.closeEntry()
             var completed = 0
-            progress(0, total)
+            progress(0, total.toInt())
             albums.forEachIndexed { albumIndex, _ ->
                 pages[albumIndex].forEachIndexed { pageIndex, page ->
                     currentCoroutineContext().ensureActive()
-                    val file = repository.imageFile(page)
-                    if (!file.isFile) throw IOException("找不到图片：${page.originalName}")
+                    val file = imageFiles[albumIndex][pageIndex]
                     zip.putNextEntry(ZipEntry("a${albumIndex}/p${pageIndex}"))
                     file.inputStream().buffered().use { it.copyTo(zip, 128 * 1024) }
                     zip.closeEntry()
                     completed++
-                    if (completed % 10 == 0 || completed == total) progress(completed, total)
+                    if (completed % 10 == 0 || completed.toLong() == total) progress(completed, total.toInt())
                 }
             }
         }
@@ -100,10 +118,12 @@ class ArchiveManager(private val context: Context, private val repository: Comic
                 }
                 zip.closeEntry()
                 val albums = manifest.getJSONArray("albums")
-                if (albums.length() !in 1..1000) throw IOException("备份图集数量异常")
-                val total = (0 until albums.length()).sumOf { albums.getJSONObject(it).getJSONArray("pages").length() }
-                if (total > 200_000) throw IOException("备份图片数量异常")
-                progress(0, total)
+                ArchiveLimits.validateAlbumCount(albums.length())
+                val total = (0 until albums.length()).sumOf {
+                    albums.getJSONObject(it).getJSONArray("pages").length().toLong()
+                }
+                ArchiveLimits.validateImageCount(total)
+                progress(0, total.toInt())
                 var completed = 0
                 val result = mutableListOf<StagedAlbum>()
                 repeat(albums.length()) { albumIndex ->
@@ -129,7 +149,7 @@ class ArchiveManager(private val context: Context, private val repository: Comic
                             image.name, name, width, height,
                         ))
                         completed++
-                        if (completed % 10 == 0 || completed == total) progress(completed, total)
+                        if (completed % 10 == 0 || completed.toLong() == total) progress(completed, total.toInt())
                     }
                     result.add(StagedAlbum(
                         album.optString("title", "恢复的图集").take(80).ifBlank { "恢复的图集" },
@@ -171,13 +191,14 @@ class ArchiveManager(private val context: Context, private val repository: Comic
     }
 
     private fun readManifest(zip: ZipInputStream): ByteArray {
-        val limit = 64 * 1024 * 1024
         val output = java.io.ByteArrayOutputStream()
         val buffer = ByteArray(32 * 1024)
         while (true) {
             val count = zip.read(buffer)
             if (count < 0) break
-            if (output.size() + count > limit) throw IOException("备份目录过大")
+            if (output.size().toLong() + count > ArchiveLimits.MAX_MANIFEST_BYTES) {
+                throw IOException("备份目录超过 64 MiB，无法恢复")
+            }
             output.write(buffer, 0, count)
         }
         return output.toByteArray()
@@ -192,7 +213,7 @@ class ArchiveManager(private val context: Context, private val repository: Comic
                 val count = zip.read(buffer)
                 if (count < 0) break
                 total += count
-                if (total > 100L * 1024 * 1024) throw IOException("备份中单张图片超过 100 MB")
+                if (total > ArchiveLimits.MAX_IMAGE_BYTES) throw IOException("备份中单张图片超过 100 MiB")
                 output.write(buffer, 0, count)
             }
         }
