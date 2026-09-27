@@ -78,14 +78,22 @@ internal class DragReorderState(internal val listState: LazyListState) {
     private fun moveAcrossItems() {
         val id = draggingId ?: return
         val ids = order ?: return
+        val items = listState.layoutInfo.visibleItemsInfo
+        val from = ids.indexOf(id)
+        // The new order can be composed a frame after the pointer event. Reusing an old
+        // layout would move the item back and forth until that frame is measured.
+        if (from < 0 || items.firstOrNull { it.key == id }?.index != from) return
         val middle = dragTop + draggedHeight / 2f
-        val target = listState.layoutInfo.visibleItemsInfo.firstOrNull {
+        val target = items.firstOrNull {
             it.key != id && middle >= it.offset && middle < it.offset + it.size
         } ?: return
-        val from = ids.indexOf(id)
         val to = ids.indexOf(target.key as? Long ?: return)
-        if (from < 0 || to < 0 || from == to) return
+        if (to < 0 || target.index != to || from == to) return
+        val firstIndex = listState.firstVisibleItemIndex
+        val firstOffset = listState.firstVisibleItemScrollOffset
         order = ids.toMutableList().apply { add(to, removeAt(from)) }
+        // Stable item keys otherwise keep the previous first item in view and jump the list.
+        listState.requestScrollToItem(firstIndex, firstOffset)
     }
 
     suspend fun autoScroll(edgePx: Float) {
@@ -99,8 +107,7 @@ internal class DragReorderState(internal val listState: LazyListState) {
                 else -> 0f
             }
             if (speed != 0f) {
-                listState.scrollBy(speed)
-                moveAcrossItems()
+                if (listState.scrollBy(speed) != 0f) moveAcrossItems()
             }
             delay(16)
         }
