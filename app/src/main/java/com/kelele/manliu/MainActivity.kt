@@ -354,54 +354,54 @@ private fun LibraryScreen(
                                 Modifier.weight(1f).clickable { onOpen(album.id) },
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                            if (album.coverName != null) {
-                                AsyncImage(
-                                    model = repository.imageFile(album.id, album.coverName),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp)),
-                                )
-                            } else {
-                                Box(
-                                    Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp))
-                                        .background(accentSoft),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Image(
-                                        painter = painterResource(R.drawable.manliu_muse),
+                                if (album.coverName != null) {
+                                    AsyncImage(
+                                        model = repository.imageFile(album.id, album.coverName),
                                         contentDescription = null,
-                                        modifier = Modifier.size(78.dp),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp)),
                                     )
+                                } else {
+                                    Box(
+                                        Modifier.size(82.dp, 104.dp).clip(RoundedCornerShape(14.dp))
+                                            .background(accentSoft),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Image(
+                                            painter = painterResource(R.drawable.manliu_muse),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(78.dp),
+                                        )
+                                    }
                                 }
-                            }
-                            Spacer(Modifier.width(16.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    album.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    if (album.pageCount == 0) "等待添加图片" else album.pageCount.toString() + " 张图片",
-                                    color = softText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                if (album.pageCount > 0) {
-                                    Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.width(16.dp))
+                                Column(Modifier.weight(1f)) {
                                     Text(
-                                        if (album.progressPage > 0) "继续阅读" else "开始阅读",
-                                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                                            .clickable { onRead(album.id) }
-                                            .padding(vertical = 4.dp),
-                                        color = accent,
-                                        style = MaterialTheme.typography.labelLarge,
+                                        album.title,
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        if (album.pageCount == 0) "等待添加图片" else album.pageCount.toString() + " 张图片",
+                                        color = softText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    if (album.pageCount > 0) {
+                                        Spacer(Modifier.height(12.dp))
+                                        Text(
+                                            if (album.progressPage > 0) "继续阅读" else "开始阅读",
+                                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                                .clickable { onRead(album.id) }
+                                                .padding(vertical = 4.dp),
+                                            color = accent,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
                                 }
-                            }
                             }
                             if (shownAlbums.size > 1) DragHandle()
                         }
@@ -759,11 +759,11 @@ private fun AlbumScreen(
                             .zIndex(if (dragState.draggingId == page.id) 1f else 0f)
                             .offset { IntOffset(0, dragState.offsetFor(page.id)) }
                             .then(
-                            if (selectingPages) Modifier.clickable {
-                                selectedPageIds = if (page.id in selectedPageIds) selectedPageIds - page.id
-                                else selectedPageIds + page.id
-                            } else Modifier,
-                        ),
+                                if (selectingPages) Modifier.clickable {
+                                    selectedPageIds = if (page.id in selectedPageIds) selectedPageIds - page.id
+                                    else selectedPageIds + page.id
+                                } else Modifier,
+                            ),
                         shape = RoundedCornerShape(18.dp),
                         border = BorderStroke(1.dp, hairline),
                     ) {
