@@ -195,7 +195,8 @@ private fun LibraryScreen(
     onRead: (Long) -> Unit,
     notify: (String) -> Unit,
 ) {
-    val albums by repository.overviews.collectAsState(initial = emptyList())
+    val loadedAlbums by repository.overviews.collectAsState(initial = null)
+    val albums = loadedAlbums ?: emptyList()
     val archive by ArchiveStatus.progress.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -212,6 +213,13 @@ private fun LibraryScreen(
     val restorePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> restoreFile = uri }
+
+    if (loadedAlbums == null) {
+        Box(Modifier.fillMaxSize().background(background), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = accent)
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize().background(background)) {
         Row(
@@ -576,7 +584,7 @@ private fun AlbumScreen(
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
                         text = { Text("按文件名排序：1 → 9") },
-                        enabled = !importing && pages.size > 1,
+                        enabled = !importing && !dragState.waitingForSave && pages.size > 1,
                         onClick = {
                             showMenu = false
                             scope.launch {
@@ -587,7 +595,7 @@ private fun AlbumScreen(
                     )
                     DropdownMenuItem(
                         text = { Text("按文件名排序：9 → 1") },
-                        enabled = !importing && pages.size > 1,
+                        enabled = !importing && !dragState.waitingForSave && pages.size > 1,
                         onClick = {
                             showMenu = false
                             scope.launch {
