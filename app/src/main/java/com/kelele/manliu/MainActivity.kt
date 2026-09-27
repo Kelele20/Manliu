@@ -403,7 +403,7 @@ private fun AlbumScreen(
 ) {
     val album by remember(albumId) { repository.album(albumId) }.collectAsState(initial = null)
     val loadedPages by remember(albumId) { repository.pages(albumId) }
-        .collectAsState<List<ComicPage>?>(initial = null)
+        .collectAsState(initial = null)
     val pages = loadedPages ?: emptyList()
     val latestImport by remember(albumId) { repository.latestImport(albumId) }.collectAsState(initial = null)
     val archive by ArchiveStatus.progress.collectAsState()
