@@ -12,6 +12,7 @@ import androidx.room.withTransaction
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
@@ -86,6 +87,8 @@ class ComicRepository private constructor(private val context: Context) {
                 try {
                     importOne(albumId, uri)
                     imported++
+                } catch (error: CancellationException) {
+                    throw error
                 } catch (_: Exception) {
                     failed++
                 }
@@ -158,12 +161,126 @@ class ComicRepository private constructor(private val context: Context) {
             }
         }
 
+    /** Persist the selection before staging so rotation and service restarts retain the task. */
+    suspend fun createSelectedImport(albumId: Long, uris: List<Uri>): Long = withContext(Dispatchers.IO) {
+        val selected = uris.distinct().take(100)
+        require(selected.isNotEmpty()) { "没有选择图片" }
+        removeAbandonedStaging()
+        val names = selected.mapIndexed { index, uri -> displayName(uri) ?: "图片 ${index + 1}" }
+        val batch = UUID.randomUUID().toString()
+        database.withTransaction {
+            require(dao.findAlbum(albumId) != null) { "图集不存在" }
+            require(dao.unfinishedImport(albumId) == null) { "请先完成或取消上次导入" }
+            val taskId = dao.addImportJob(ImportJob(
+                albumId = albumId, folderUri = "staged:$batch", status = "PREPARING", total = selected.size,
+                message = "正在保存所选图片",
+            ))
+            dao.addImportItems(selected.mapIndexed { index, uri ->
+                ImportItem(taskId = taskId, sequence = index, uri = uri.toString(),
+                    name = names[index], sizeBytes = -1)
+            })
+            taskId
+        }
+    }
+
+    /** Stage transient picker URIs while the foreground service is alive. Already staged items survive restarts. */
+    suspend fun prepareNextImport(onProgress: (Int, Int) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        val task = dao.nextPreparingImport() ?: return@withContext false
+        val batch = task.folderUri.removePrefix("staged:")
+        require(task.folderUri.startsWith("staged:") && batch.matches(Regex("[0-9a-f-]{36}"))) {
+            "导入任务来源无效"
+        }
+        val staging = stagingDirectory(batch).apply { mkdirs() }
+        val pending = dao.pendingItems(task.id)
+        for ((index, item) in pending.withIndex()) {
+            currentCoroutineContext().ensureActive()
+            if (dao.findImportJob(task.id)?.status != "PREPARING") return@withContext true
+            val file = File(staging, item.sequence.toString())
+            val partial = File(staging, "${item.sequence}.part")
+            try {
+                if (!file.isFile) {
+                    partial.delete()
+                    val source = context.contentResolver.openInputStream(Uri.parse(item.uri))
+                        ?: throw IOException("无法读取 ${item.name}")
+                    var size = 0L
+                    source.use { input ->
+                        partial.outputStream().buffered().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                size += count
+                                if (size > 100L * 1024 * 1024) throw IOException("${item.name} 超过 100 MB")
+                                if (staging.usableSpace < 32L * 1024 * 1024) {
+                                    throw StorageFullException("存储空间不足，请清理空间后继续")
+                                }
+                                output.write(buffer, 0, count)
+                            }
+                        }
+                    }
+                    if (!partial.renameTo(file)) throw IOException("无法保存 ${item.name}")
+                }
+                if (dao.findImportJob(task.id)?.status != "PREPARING") return@withContext true
+                dao.updateImportItemSource(item.id, Uri.fromFile(file).toString(), file.length())
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: StorageFullException) {
+                dao.pauseActiveImport(task.id, error.message ?: "存储空间不足")
+                return@withContext true
+            } catch (error: Exception) {
+                database.withTransaction {
+                    if (dao.findImportJob(task.id)?.status == "PREPARING") {
+                        dao.markImportItem(item.id, "FAILED", error.message?.take(120) ?: "无法读取图片")
+                        dao.recordImportResult(task.id, 0, 1)
+                    }
+                }
+            } finally {
+                partial.delete()
+            }
+            val prepared = index + 1
+            if (dao.findImportJob(task.id)?.status == "PREPARING") {
+                dao.setImportMessage(task.id, "正在保存所选图片 $prepared / ${pending.size}")
+                onProgress(prepared, pending.size)
+            }
+        }
+        dao.finishPreparing(task.id)
+        true
+    }
+
+    private fun stagingDirectory(batch: String): File = File(context.filesDir, "import-staging/$batch")
+
+    private suspend fun removeAbandonedStaging() {
+        val referenced = dao.stagedImportSources().map { it.removePrefix("staged:") }.toSet()
+        File(context.filesDir, "import-staging").listFiles()?.forEach { directory ->
+            if (directory.isDirectory && directory.name !in referenced) directory.deleteRecursively()
+        }
+    }
+
+    private fun removeStagedFiles(job: ImportJob) {
+        val batch = job.folderUri.removePrefix("staged:")
+        if (job.folderUri.startsWith("staged:") && batch.matches(Regex("[0-9a-f-]{36}"))) {
+            stagingDirectory(batch).deleteRecursively()
+        }
+    }
+
+    private fun removeStagedItem(job: ImportJob, item: ImportItem) {
+        val batch = job.folderUri.removePrefix("staged:")
+        if (job.folderUri.startsWith("staged:") && batch.matches(Regex("[0-9a-f-]{36}"))) {
+            val directory = stagingDirectory(batch).canonicalFile
+            val file = Uri.parse(item.uri).path?.let { File(it).canonicalFile }
+            if (file?.parentFile == directory) file.delete()
+        }
+    }
+
     suspend fun pauseImport(taskId: Long) = withContext(Dispatchers.IO) {
-        dao.setImportState(taskId, "PAUSED", "已暂停，可继续导入")
+        dao.pauseActiveImport(taskId, "已暂停，可继续导入")
     }
 
     suspend fun cancelImport(taskId: Long) = withContext(Dispatchers.IO) {
-        dao.setImportState(taskId, "CANCELLED", "已停止，已导入的图片保留")
+        if (dao.cancelActiveImport(taskId, "已停止，已导入的图片保留") > 0) {
+            dao.findImportJob(taskId)?.let(::removeStagedFiles)
+        }
     }
 
     suspend fun pauseRunningImport(message: String) = withContext(Dispatchers.IO) {
@@ -177,8 +294,9 @@ class ComicRepository private constructor(private val context: Context) {
             if (retryFailures) {
                 dao.resetFailedItems(taskId)
                 dao.resetFailedCounter(taskId)
+                if (task.folderUri.startsWith("staged:")) dao.setImportState(taskId, "PREPARING", null)
             } else if (task.processed < task.total) {
-                dao.setImportState(taskId, "QUEUED", null)
+                dao.setImportState(taskId, if (task.folderUri.startsWith("staged:")) "PREPARING" else "QUEUED", null)
             } else {
                 dao.setImportStatus(taskId, "DONE")
             }
@@ -187,8 +305,7 @@ class ComicRepository private constructor(private val context: Context) {
 
     suspend fun processNextImport(onProgress: (ImportJob) -> Unit): Boolean = withContext(Dispatchers.IO) {
         val task = dao.nextQueuedImport() ?: return@withContext false
-        dao.setImportState(task.id, "RUNNING", null)
-        var nextPosition = dao.nextPosition(task.albumId)
+        if (dao.claimImportJob(task.id) == 0) return@withContext true
         while (true) {
             currentCoroutineContext().ensureActive()
             val current = dao.findImportJob(task.id) ?: return@withContext true
@@ -199,29 +316,43 @@ class ComicRepository private constructor(private val context: Context) {
                 val (width, height) = copyAndInspect(task.albumId, Uri.parse(item.uri), filename, item.sizeBytes)
                 database.withTransaction {
                     if (dao.findAlbum(task.albumId) == null) throw IOException("图集已删除")
+                    if (dao.findImportJob(task.id)?.status != "RUNNING") {
+                        imageFile(task.albumId, filename).delete()
+                        return@withTransaction
+                    }
                     if (dao.pageForImportItem(item.id) == null) {
+                        val appendPosition = dao.nextPosition(task.albumId)
+                        val position = importInsertionPosition(
+                            dao.nextImportedPosition(task.id, item.sequence),
+                            dao.previousImportedPosition(task.id, item.sequence),
+                            appendPosition,
+                        )
+                        if (position < appendPosition) {
+                            dao.makeRoomForPage(task.albumId, position)
+                            dao.shiftReadingPositionAfterInsert(task.albumId, position)
+                        }
                         dao.addPage(ComicPage(
                             albumId = task.albumId,
-                            position = nextPosition,
+                            position = position,
                             fileName = filename,
                             originalName = item.name,
                             width = width,
                             height = height,
                             importItemId = item.id,
                         ))
-                        nextPosition++
                     }
                     dao.markImportItem(item.id, "DONE", null)
                     dao.recordImportResult(task.id, 1, 0)
                 }
+                if (dao.pageForImportItem(item.id) != null) removeStagedItem(task, item)
             } catch (error: StorageFullException) {
-                dao.setImportState(task.id, "PAUSED", error.message)
+                dao.pauseActiveImport(task.id, error.message ?: "存储空间不足")
                 return@withContext true
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Exception) {
                 database.withTransaction {
-                    if (dao.findImportJob(task.id) != null) {
+                    if (dao.findImportJob(task.id)?.status == "RUNNING") {
                         dao.markImportItem(item.id, "FAILED", error.message?.take(120) ?: "无法读取图片")
                         dao.recordImportResult(task.id, 0, 1)
                     }
@@ -231,7 +362,9 @@ class ComicRepository private constructor(private val context: Context) {
             if (latest.processed % 10 == 0 || latest.processed == latest.total) onProgress(latest)
         }
         val finished = dao.findImportJob(task.id) ?: return@withContext true
-        dao.setImportState(task.id, "DONE", if (finished.failed > 0) "有 ${finished.failed} 张导入失败，可查看并重试" else null)
+        if (dao.completeRunningImport(task.id, if (finished.failed > 0) "有 ${finished.failed} 张导入失败，可查看并重试" else null) > 0 && finished.failed == 0) {
+            removeStagedFiles(task)
+        }
         onProgress(dao.findImportJob(task.id) ?: finished)
         true
     }

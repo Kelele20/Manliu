@@ -20,7 +20,7 @@
 
 ## 构建
 
-Android Studio 打开本项目，安装 JDK 17 和 Android SDK 35；运行 `./gradlew :app:testDebugUnitTest :app:assembleDebug`（Windows：`.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug`）执行单元测试并构建 APK。输出为 `app/build/outputs/apk/debug/app-debug.apk`。已有安装若需覆盖升级，需要将原私有 `manliu-dev-key.keystore` 放在项目根目录再构建；**密钥不在仓库或 Release 中**，不要上传或公开它。
+Android Studio 打开本项目，安装 JDK 17 和 Android SDK 35；运行 `./gradlew :app:testDebugUnitTest :app:assembleDebug`（Windows：`.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug`）执行单元测试并构建 APK。输出为 `app/build/outputs/apk/debug/app-debug.apk`。已有安装若需覆盖升级，需要将原私有 `manliu-dev-key.keystore` 放在项目根目录再构建。
 
 Pull Request 的 GitHub Actions 运行上述任务：11 项 JVM 单元测试和 Debug APK 构建；不运行 Android 仪器测试。
 
