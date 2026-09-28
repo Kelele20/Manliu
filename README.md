@@ -25,4 +25,3 @@ Android Studio 打开本项目，安装 JDK 17 和 Android SDK 35；运行 `./gr
 Pull Request 的 GitHub Actions 运行上述任务：11 项 JVM 单元测试和 Debug APK 构建；不运行 Android 仪器测试。
 
 技术栈：Kotlin、Jetpack Compose、Room、Coil。图集元数据在 Room，图片在应用专属目录。应用不需要账户，也未声明自身网络权限。
-
