@@ -88,6 +88,7 @@ import kotlinx.coroutines.launch
 
 private data class FolderSelection(val uri: Uri, val images: List<FolderImage>)
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun AlbumScreen(
     repository: ComicRepository,
@@ -125,6 +126,20 @@ fun AlbumScreen(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri -> uri?.let { ArchiveService.export(context, it, albumId) } }
 
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { ImportService.start(context) }
+
+    val launchImportService: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            ImportService.start(context)
+        }
+    }
+
     val importSelected: (List<Uri>) -> Unit = { uris ->
         if (uris.isNotEmpty()) {
             try {
@@ -142,9 +157,7 @@ fun AlbumScreen(
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> importSelected(uris) }
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { ImportService.start(context) }
+
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -182,16 +195,6 @@ fun AlbumScreen(
                     importing = false
                 }
             }
-        }
-    }
-
-    val launchImportService: () -> Unit = {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            ImportService.start(context)
         }
     }
 

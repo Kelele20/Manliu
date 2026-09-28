@@ -77,6 +77,7 @@ import com.kelele.manliu.ui.theme.SoftText
 import com.kelele.manliu.ui.theme.SurfaceLight
 import kotlinx.coroutines.launch
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(
     repository: ComicRepository,
