@@ -8,13 +8,14 @@ plugins {
 android {
     namespace = "com.kelele.manliu"
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.kelele.manliu"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.3.3"
+        versionCode = 9
+        versionName = "0.4.0"
     }
 
     signingConfigs {
