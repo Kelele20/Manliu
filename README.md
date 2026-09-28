@@ -1,27 +1,180 @@
-# 漫流（Manliu）
+# 漫流 Manliu
 
-离线安卓条漫阅读器。创建图集、导入图片、调整阅读顺序，然后连续向下滑动阅读；自动保存阅读位置。默认浅色界面，配有原创二次元少女图标。
+> 离线安卓条漫阅读器 — 创建图集、导入图片、调整顺序，然后连续向下滑动阅读。
 
-[使用与开发说明](docs/使用与开发说明.md) · [下载 v0.3.3 正式版 APK](https://github.com/Kelele20/Manliu/releases/tag/v0.3.3)（私有仓库，需登录授权）
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/manliu_muse.png" alt="漫流少女" width="160" />
+</p>
 
-## 功能
+<p align="center">
+  <a href="https://github.com/Kelele20/Manliu/releases/tag/v0.3.3">📦 下载 v0.3.3 正式版 APK</a>
+  &nbsp;·&nbsp;
+  <a href="docs/使用与开发说明.md">📖 使用与开发说明</a>
+  &nbsp;·&nbsp;
+  <a href="docs/架构设计.md">🏗️ 架构设计</a>
+</p>
 
-- **文件夹单次最多导入 10000 张**：选取图片文件夹，在漫流中全选或逐张选取，可按自然文件名升序、降序或修改时间排序。只读取当前层级；导入支持暂停、继续、取消及失败清单和重试。相册/文件多选由前台服务持久处理，离开图集页后仍可继续，失败项按原顺序重试；若暂存完成前中断且原授权失效，需重新选择对应图片。导入前显示预估空间需求。
-- **其他图片来源**：系统相册和「从文件选择」仍可使用，单次最多选择 100 张；系统选择器可能进一步限制相册可选数量。
-- **整理和阅读**：长按手柄拖动图集或图片；图片也能按文件名排序、全选或批量删除。首页的「开始阅读／继续阅读」直接进入阅读页，阅读时点页码跳转。阅读页会实时显示后台新增图片，并按图片 ID 保持阅读位置。图集列表只查询封面与图片数量，不必加载图集里的所有图片。
-- **备份和恢复**：在首页菜单备份全部图集，或在图集菜单备份单个图集；首页菜单可从漫流生成的 `.manliu` 文件恢复。备份包含图集、图片顺序和阅读进度；恢复会新增图集，不覆盖现有内容。导出和恢复共用上限：最多 1000 个图集、200000 张图片，备份清单不超过 64 MiB、单张图片不超过 100 MiB；超限时导出会在写入前拒绝。旧版含章节的备份可恢复图片与顺序，但章节标记不再显示。
-- **本地存储**：导入的图片复制到应用专属空间，原图移动或删除不会同步删除副本。图集删除和卸载应用会清除对应的应用内副本。
+---
 
-## 安装
+## ✨ 功能亮点
 
-[v0.3.3 正式版](https://github.com/Kelele20/Manliu/releases/tag/v0.3.3)已发布；[v0.3.0 旧版](https://github.com/Kelele20/Manliu/releases/tag/v0.3.0)也保留在 Releases。最低支持 Android 8.0。v0.3.3 与 v0.3.2 使用同一签名，可覆盖安装；升级前请备份重要图集，不要先卸载旧版。Release 记录的用户真机试用未发现明显问题，但异常流程和各机型尚未逐项验证，详见使用说明。仓库为私有仓库，下载需要有权限的 GitHub 账号。
+| 功能 | 说明 |
+|------|------|
+| **批量导入** | 文件夹一次最多导入 10,000 张；相册/文件多选单次最多 100 张 |
+| **连续滚动阅读** | 向下滑动翻页，自动保存阅读位置，支持页码跳转 |
+| **拖拽排序** | 长按手柄拖动图集或图片调整顺序，靠近边缘自动滚动 |
+| **智能排序** | 按文件名自然排序（2.jpg 在 10.jpg 前面），升序/降序可选 |
+| **后台导入** | 前台服务保障持久处理，离开页面后仍继续；支持暂停、继续、取消和失败重试 |
+| **备份恢复** | 导出 `.manliu` 备份文件，包含图集、图片、顺序和阅读进度 |
+| **纯离线** | 不需要账户，不声明网络权限，图片存储在应用专属空间 |
 
-进入「新建图集」→「添加图片」→「从文件夹选择 · 全选/排序」。Android 11 及以上不能通过系统选择器进入 `Android/data` 或直接选择 `Download` 根目录；可先用手机自带文件管理器把图片复制到 `Download/漫流待导入` 等子文件夹，再选择该子文件夹。通用 ZIP/CBZ 和递归导入子文件夹尚未实现；`.manliu` 是漫流自己的备份格式。
+## 📱 系统要求
 
-## 构建
+- **最低版本**：Android 8.0（API 26）
+- **目标版本**：Android 15（API 35）
+- **仓库权限**：私有仓库，下载 APK 需要有权限的 GitHub 账号
 
-Android Studio 打开本项目，安装 JDK 17 和 Android SDK 35；运行 `./gradlew :app:testDebugUnitTest :app:assembleDebug`（Windows：`.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug`）执行单元测试并构建 APK。输出为 `app/build/outputs/apk/debug/app-debug.apk`。已有安装若需覆盖升级，需要将原私有 `manliu-dev-key.keystore` 放在项目根目录再构建。
+## 🚀 安装
 
-Pull Request 的 GitHub Actions 运行上述任务：11 项 JVM 单元测试和 Debug APK 构建；不运行 Android 仪器测试。
+从 [Releases](https://github.com/Kelele20/Manliu/releases) 下载最新 APK：
 
-技术栈：Kotlin、Jetpack Compose、Room、Coil。图集元数据在 Room，图片在应用专属目录。应用不需要账户，也未声明自身网络权限。
+| 版本 | 说明 |
+|------|------|
+| [v0.3.3 正式版](https://github.com/Kelele20/Manliu/releases/tag/v0.3.3) | 当前最新版，推荐使用 |
+| [v0.3.0 旧版](https://github.com/Kelele20/Manliu/releases/tag/v0.3.0) | 保留在 Releases 供回退 |
+
+> **升级提醒**：v0.3.3 与 v0.3.2 使用同一签名，可覆盖安装。升级前请先备份重要图集，不要先卸载旧版。
+
+## 🎯 快速上手
+
+```
+新建图集 → 添加图片 → 从文件夹选择 · 全选/排序 → 开始阅读
+```
+
+1. 在首页点击 **新建** 按钮创建图集
+2. 进入图集后点击 **添加图片**，选择图片来源
+3. 推荐使用 **文件夹选择** 批量导入，支持全选和排序
+4. 导入完成后点击 **开始阅读** 进入连续滚动阅读
+
+> **提示**：Android 11+ 不能直接选择 `Android/data` 或 `Download` 根目录。可先将图片复制到 `Download/漫流待导入` 等子文件夹。
+
+## 🏗️ 技术栈
+
+| 技术 | 用途 |
+|------|------|
+| [Kotlin](https://kotlinlang.org/) | 编程语言 |
+| [Jetpack Compose](https://developer.android.com/jetpack/compose) | 声明式 UI 框架 |
+| [Room](https://developer.android.com/training/data-storage/room) | 本地数据库（SQLite 抽象层） |
+| [Coil](https://coil-kt.github.io/coil/) | 图片异步加载 |
+| [KSP](https://github.com/google/ksp) | Kotlin 符号处理（Room 注解处理） |
+
+## 🔨 从源码构建
+
+### 环境要求
+
+- JDK 17
+- Android SDK 35
+- Android Studio（推荐）
+
+### 构建步骤
+
+```bash
+# 克隆仓库
+git clone https://github.com/Kelele20/Manliu.git
+cd Manliu
+
+# 运行单元测试 + 构建 Debug APK
+./gradlew :app:testDebugUnitTest :app:assembleDebug
+```
+
+Windows 用户：
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug
+```
+
+构建产物：`app/build/outputs/apk/debug/app-debug.apk`
+
+> **签名说明**：开发签名密钥 `manliu-dev-key.keystore` 单独保存，不在 Git 仓库中。要用同一签名覆盖安装，需将密钥文件放在项目根目录。
+
+## 🧪 测试
+
+项目包含 **11 项 JVM 单元测试**，覆盖核心业务逻辑：
+
+| 测试文件 | 测试项数 | 覆盖范围 |
+|----------|----------|----------|
+| `ArchiveLimitsTest` | 5 | 备份边界验证：图集/图片数量上限、清单/图片大小限制 |
+| `ImportOrderingTest` | 4 | 导入顺序：失败重试插入位置、暂停恢复续传位置 |
+| `ReaderProgressTest` | 2 | 阅读进度：插入图片后位置保持、页面列表更新 |
+
+Pull Request 的 GitHub Actions 会自动运行以上测试和 Debug APK 构建。
+
+## 📂 项目结构
+
+```
+Manliu/
+├── app/
+│   ├── build.gradle.kts          # 应用级构建配置
+│   └── src/
+│       ├── main/
+│       │   ├── AndroidManifest.xml
+│       │   ├── java/com/kelele/manliu/
+│       │   │   ├── MainActivity.kt       # 单 Activity + Compose UI
+│       │   │   ├── ComicDatabase.kt      # Room 实体、DAO、数据库迁移
+│       │   │   ├── ComicRepository.kt    # 核心业务逻辑（单例仓库）
+│       │   │   ├── ImportService.kt      # 图片导入前台服务
+│       │   │   ├── ArchiveService.kt     # 备份恢复前台服务
+│       │   │   ├── ArchiveManager.kt     # 备份导出与恢复引擎
+│       │   │   ├── ArchiveLimits.kt      # 备份规格限制与校验
+│       │   │   ├── DragReorderState.kt   # 拖拽排序状态机
+│       │   │   ├── ImageSorting.kt       # 自然文件名排序算法
+│       │   │   ├── ImportOrdering.kt     # 导入重试插入位置算法
+│       │   │   └── ReaderProgress.kt     # 阅读进度恢复逻辑
+│       │   └── res/                      # 资源文件
+│       └── test/                         # JVM 单元测试
+├── build.gradle.kts              # 项目级构建配置
+├── settings.gradle.kts           # 项目设置
+├── docs/                         # 文档目录
+│   ├── 使用与开发说明.md
+│   └── 架构设计.md
+├── CONTRIBUTING.md               # 贡献指南
+├── CHANGELOG.md                  # 版本变更记录
+└── .github/workflows/            # CI 配置
+    └── android-build.yml
+```
+
+详细架构说明请查看 [架构设计文档](docs/架构设计.md)。
+
+## 📋 备份格式
+
+`.manliu` 文件是一个 ZIP 压缩包，包含：
+
+```
+archive.manliu (ZIP)
+├── manifest.json     # 图集元数据、图片顺序、阅读进度
+├── a0/p0             # 第 1 个图集的第 1 张图片
+├── a0/p1             # 第 1 个图集的第 2 张图片
+├── a1/p0             # 第 2 个图集的第 1 张图片
+└── ...
+```
+
+导出和恢复共用上限：
+
+| 限制项 | 上限 |
+|--------|------|
+| 图集数量 | 1,000 |
+| 图片数量 | 200,000 |
+| 备份清单大小 | 64 MiB |
+| 单张图片大小 | 100 MiB |
+
+## 🔮 尚未实现
+
+- 通用 ZIP/CBZ 漫画包导入
+- 递归读取子文件夹
+- 章节目录
+- 自动去白边
+- 自动备份
+
+## 📄 许可
+
+本项目为私有项目，仅供授权人员使用。
