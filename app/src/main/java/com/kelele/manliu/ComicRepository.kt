@@ -183,6 +183,94 @@ class ComicRepository private constructor(private val context: Context) {
         }
     }
 
+    /** Unpack a .zip or .cbz comic archive directly into staging, sort naturally, and enqueue for import. */
+    suspend fun createArchiveImport(albumId: Long, archiveUri: Uri): Long = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        val input = resolver.openInputStream(archiveUri) ?: throw IOException("无法打开压缩包")
+        removeAbandonedStaging()
+        val batch = UUID.randomUUID().toString()
+        val staging = stagingDirectory(batch).apply { mkdirs() }
+        val stagedItems = mutableListOf<Triple<String, File, Long>>()
+
+        try {
+            java.util.zip.ZipInputStream(java.io.BufferedInputStream(input, 128 * 1024)).use { zip ->
+                var tempIndex = 0
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val entry = zip.nextEntry ?: break
+                    val entryName = entry.name
+                    val fileName = entryName.substringAfterLast('/')
+                    val ext = fileName.substringAfterLast('.', "").lowercase()
+                    if (!entry.isDirectory &&
+                        !entryName.contains("__MACOSX") &&
+                        !fileName.startsWith(".") &&
+                        ext in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")
+                    ) {
+                        val tempFile = File(staging, "temp_$tempIndex.$ext")
+                        val partial = File(staging, "temp_$tempIndex.part")
+                        partial.delete()
+                        partial.outputStream().buffered().use { out ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val count = zip.read(buffer)
+                                if (count < 0) break
+                                out.write(buffer, 0, count)
+                            }
+                        }
+                        if (partial.renameTo(tempFile)) {
+                            stagedItems.add(Triple(fileName, tempFile, tempFile.length()))
+                            tempIndex++
+                        } else {
+                            partial.delete()
+                        }
+                    }
+                    zip.closeEntry()
+                }
+            }
+
+            if (stagedItems.isEmpty()) {
+                staging.deleteRecursively()
+                throw IOException("压缩包中没有找到有效图片")
+            }
+
+            stagedItems.sortWith { a, b -> compareImageNames(a.first, b.first) }
+
+            val finalItems = stagedItems.mapIndexed { index, item ->
+                val finalFile = File(staging, index.toString())
+                if (item.second != finalFile) {
+                    item.second.renameTo(finalFile)
+                }
+                Triple(item.first, finalFile, item.third)
+            }
+
+            database.withTransaction {
+                require(dao.findAlbum(albumId) != null) { "图集不存在" }
+                require(dao.unfinishedImport(albumId) == null) { "请先完成或取消上次导入" }
+                val taskId = dao.addImportJob(ImportJob(
+                    albumId = albumId,
+                    folderUri = "staged:$batch",
+                    status = "QUEUED",
+                    total = finalItems.size,
+                    message = "正在导入漫画包图片",
+                ))
+                dao.addImportItems(finalItems.mapIndexed { index, item ->
+                    ImportItem(
+                        taskId = taskId,
+                        sequence = index,
+                        uri = Uri.fromFile(item.second).toString(),
+                        name = item.first,
+                        sizeBytes = item.third,
+                    )
+                })
+                taskId
+            }
+        } catch (error: Exception) {
+            staging.deleteRecursively()
+            throw error
+        }
+    }
+
     /** Stage transient picker URIs while the foreground service is alive. Already staged items survive restarts. */
     suspend fun prepareNextImport(onProgress: (Int, Int) -> Unit): Boolean = withContext(Dispatchers.IO) {
         val task = dao.nextPreparingImport() ?: return@withContext false
