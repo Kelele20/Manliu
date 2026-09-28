@@ -20,6 +20,6 @@
 
 ## 构建
 
-Android Studio 打开本项目，安装 JDK 17 和 Android SDK 35；运行 `./gradlew assembleDebug`（Windows：`.\gradlew.bat assembleDebug`）。输出为 `app/build/outputs/apk/debug/app-debug.apk`。已有安装若需覆盖升级，需要将原私有 `manliu-dev-key.keystore` 放在项目根目录再构建；**密钥不在仓库或 Release 中**，不要上传或公开它。
+Android Studio 打开本项目，安装 JDK 17 和 Android SDK 35；运行 `./gradlew assembleDebug`（Windows：`.\gradlew.bat assembleDebug`）。输出为 `app/build/outputs/apk/debug/app-debug.apk`。已有安装若需覆盖升级，需要将原私有 `manliu-dev-key.keystore` 放在项目根目录再构建。
 
 技术栈：Kotlin、Jetpack Compose、Room、Coil。图集元数据在 Room，图片在应用专属目录。无需账户或自身网络权限。
