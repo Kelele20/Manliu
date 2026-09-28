@@ -164,6 +164,8 @@ class ImportService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        // 重置全局反馈状态，防止 Service 重建时残留旧的错误信息
+        ImportFeedback.message.value?.let { ImportFeedback.clear(it) }
         super.onDestroy()
     }
 
