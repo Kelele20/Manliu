@@ -227,10 +227,22 @@ fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(shownAlbums, key = { it.id }) { album ->
+                    val isDragging = dragState.draggingId == album.id
                     Card(
                         modifier = Modifier.fillMaxWidth()
-                            .zIndex(if (dragState.draggingId == album.id) 1f else 0f)
-                            .offset { IntOffset(0, dragState.offsetFor(album.id)) },
+                            .zIndex(if (isDragging) 1f else 0f)
+                            .then(
+                                if (!isDragging) {
+                                    Modifier.animateItemPlacement(
+                                        animationSpec = androidx.compose.animation.core.spring(
+                                            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                                        ),
+                                    )
+                                } else {
+                                    Modifier.offset { IntOffset(0, dragState.offsetFor(album.id)) }
+                                },
+                            ),
                         colors = CardDefaults.cardColors(containerColor = SurfaceLight),
                         shape = RoundedCornerShape(22.dp),
                         border = BorderStroke(1.dp, Hairline),

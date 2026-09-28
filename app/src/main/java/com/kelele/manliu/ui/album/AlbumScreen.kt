@@ -399,11 +399,23 @@ fun AlbumScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 itemsIndexed(shownPages, key = { _, page -> page.id }) { index, page ->
+                    val isDragging = dragState.draggingId == page.id
                     Card(
                         colors = CardDefaults.cardColors(containerColor = SurfaceLight),
                         modifier = Modifier.fillMaxWidth()
-                            .zIndex(if (dragState.draggingId == page.id) 1f else 0f)
-                            .offset { IntOffset(0, dragState.offsetFor(page.id)) }
+                            .zIndex(if (isDragging) 1f else 0f)
+                            .then(
+                                if (!isDragging) {
+                                    Modifier.animateItemPlacement(
+                                        animationSpec = androidx.compose.animation.core.spring(
+                                            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                                        ),
+                                    )
+                                } else {
+                                    Modifier.offset { IntOffset(0, dragState.offsetFor(page.id)) }
+                                },
+                            )
                             .then(
                                 if (selectingPages) Modifier.clickable {
                                     selectedPageIds = if (page.id in selectedPageIds) selectedPageIds - page.id
