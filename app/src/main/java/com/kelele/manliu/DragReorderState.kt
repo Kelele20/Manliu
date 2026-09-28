@@ -26,14 +26,20 @@ import kotlin.math.max
 
 internal data class DragDrop(val movedId: Long, val orderedIds: List<Long>)
 
-/** Keeps a dragged order visible until Room emits the saved order. */
+/**
+ * 拖拽排序状态机（防抖动与平滑无级过渡版）
+ * 消除项交换时因单帧基准 offset 突变引起的抽搐，并保证 Room 数据库落盘前画面无回弹闪烁。
+ */
 internal class DragReorderState(internal val listState: LazyListState) {
     private var order by mutableStateOf<List<Long>?>(null)
     var draggingId by mutableStateOf<Long?>(null)
         private set
     val waitingForSave: Boolean get() = order != null && draggingId == null
-    private var dragTop by mutableFloatStateOf(0f)
-    private var draggedHeight = 0
+
+    // 手指相对于当前卡片初始锚点的实时位移
+    private var draggingOffset by mutableFloatStateOf(0f)
+    private var draggedItemHeight = 0
+    private var initialItemOffset = 0
     private var originalOrder = emptyList<Long>()
 
     fun <T> arranged(source: List<T>, id: (T) -> Long): List<T> {
@@ -44,10 +50,14 @@ internal class DragReorderState(internal val listState: LazyListState) {
         return ids.mapNotNull(byId::get).takeIf { it.size == source.size } ?: source
     }
 
+    /** 只有当外部真实数据流完全与保存结果一致时才解冻，彻底避免松手回弹闪烁 */
     fun sourceChanged(ids: List<Long>) {
         val pending = order ?: return
         if (draggingId != null) return
-        if (ids == pending || ids.size != pending.size || ids.toSet() != pending.toSet()) {
+        if (ids == pending) {
+            order = null
+        } else if (ids.size != pending.size || ids.toSet() != pending.toSet()) {
+            // 列表内容发生了外部增删，不得不重置
             order = null
         }
     }
@@ -59,55 +69,66 @@ internal class DragReorderState(internal val listState: LazyListState) {
         originalOrder = displayedIds
         order = displayedIds
         draggingId = id
-        draggedHeight = item.size
-        dragTop = item.offset.toFloat()
+        draggedItemHeight = item.size
+        initialItemOffset = item.offset
+        draggingOffset = 0f
     }
 
     fun drag(deltaY: Float) {
         if (draggingId == null) return
-        dragTop += deltaY
+        draggingOffset += deltaY
         moveAcrossItems()
     }
 
+    /** 当前被拖拽项的平滑相对偏移（像素） */
     fun offsetFor(id: Long): Int {
         if (draggingId != id) return 0
-        val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return 0
-        return (dragTop - item.offset).toInt()
+        val currentItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return 0
+        // 将手指位移与底层 item.offset 的实际变动结合，保证绝对坐标严格连续，消除单帧跳跃
+        val currentItemOffset = currentItem.offset
+        val visualTop = initialItemOffset + draggingOffset
+        return (visualTop - currentItemOffset).toInt()
     }
 
     private fun moveAcrossItems() {
         val id = draggingId ?: return
         val ids = order ?: return
-        val items = listState.layoutInfo.visibleItemsInfo
+        val currentItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id } ?: return
         val from = ids.indexOf(id)
-        // The new order can be composed a frame after the pointer event. Reusing an old
-        // layout would move the item back and forth until that frame is measured.
-        if (from < 0 || items.firstOrNull { it.key == id }?.index != from) return
-        val middle = dragTop + draggedHeight / 2f
+        if (from < 0) return
+
+        val currentVisualCenter = initialItemOffset + draggingOffset + draggedItemHeight / 2f
+        val items = listState.layoutInfo.visibleItemsInfo
+
         val target = items.firstOrNull {
-            it.key != id && middle >= it.offset && middle < it.offset + it.size
+            it.key != id && currentVisualCenter >= it.offset && currentVisualCenter < it.offset + it.size
         } ?: return
+
         val to = ids.indexOf(target.key as? Long ?: return)
-        if (to < 0 || target.index != to || from == to) return
-        val firstIndex = listState.firstVisibleItemIndex
-        val firstOffset = listState.firstVisibleItemScrollOffset
+        if (to < 0 || from == to) return
+
+        // 发生项交换
         order = ids.toMutableList().apply { add(to, removeAt(from)) }
-        // Stable item keys otherwise keep the previous first item in view and jump the list.
-        listState.requestScrollToItem(firstIndex, firstOffset)
     }
 
     suspend fun autoScroll(edgePx: Float) {
         while (draggingId != null) {
             val layout = listState.layoutInfo
-            val topGap = dragTop - layout.viewportStartOffset
-            val bottomGap = layout.viewportEndOffset - (dragTop + draggedHeight)
+            val visualTop = initialItemOffset + draggingOffset
+            val topGap = visualTop - layout.viewportStartOffset
+            val bottomGap = layout.viewportEndOffset - (visualTop + draggedItemHeight)
             val speed = when {
-                topGap < edgePx -> -max(3f, (edgePx - topGap) / edgePx * 26f)
-                bottomGap < edgePx -> max(3f, (edgePx - bottomGap) / edgePx * 26f)
+                topGap < edgePx -> -max(3f, (edgePx - topGap) / edgePx * 24f)
+                bottomGap < edgePx -> max(3f, (edgePx - bottomGap) / edgePx * 24f)
                 else -> 0f
             }
             if (speed != 0f) {
-                if (listState.scrollBy(speed) != 0f) moveAcrossItems()
+                val scrolled = listState.scrollBy(speed)
+                if (scrolled != 0f) {
+                    // 视口滚动时，补偿初始基准锚点，保证卡片与手指完全吸合
+                    initialItemOffset -= scrolled.toInt()
+                    moveAcrossItems()
+                }
             }
             delay(16)
         }
@@ -117,14 +138,14 @@ internal class DragReorderState(internal val listState: LazyListState) {
         val id = draggingId ?: return null
         val result = order?.takeIf { it != originalOrder }
         draggingId = null
-        dragTop = 0f
+        draggingOffset = 0f
         if (result == null) order = null
         return result?.let { DragDrop(id, it) }
     }
 
     fun cancel() {
         draggingId = null
-        dragTop = 0f
+        draggingOffset = 0f
         order = null
     }
 }
