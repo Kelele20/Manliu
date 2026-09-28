@@ -7,13 +7,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Kelele20/Manliu/releases/tag/v0.3.3">📦 下载 APK</a>
+  <a href="https://github.com/Kelele20/Manliu/releases">📦 下载最新发布版</a>
   &nbsp;·&nbsp;
   <a href="docs/使用与开发说明.md">📖 使用与开发说明</a>
   &nbsp;·&nbsp;
   <a href="docs/架构设计.md">🏗️ 架构设计</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">📝 更新日志</a>
+  &nbsp;·&nbsp;
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
 </p>
 
 ---
@@ -37,7 +39,7 @@
 
 - **最低版本**：Android 8.0（API 26）
 - **目标版本**：Android 15（API 35）
-- **仓库权限**：私有仓库，下载 APK 需要有权限的 GitHub 账号
+- **开源协议**：[Apache License 2.0](LICENSE)
 
 ## 🎯 快速上手
 
@@ -176,5 +178,21 @@ archive.manliu (ZIP)
 - 左右双页翻页模式（传统漫模式）
 
 ## 📄 许可说明
+ 
+本项目采用 [Apache License 2.0](LICENSE) 开源许可证。
 
-本项目为私有开源仓库，仅供授权个人及团队使用。
+```text
+Copyright 2026 Kelele20
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
