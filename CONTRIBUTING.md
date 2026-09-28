@@ -33,8 +33,8 @@
 ### 克隆与配置
 
 ```bash
-# 1. 克隆仓库（私有仓库，需有访问权限）
-git clone git@github.com:Kelele20/Manliu.git
+# 1. 克隆仓库
+git clone https://github.com/Kelele20/Manliu.git
 cd Manliu
 
 # 2. 用 Android Studio 打开项目，等待 Gradle Sync 完成
@@ -371,3 +371,10 @@ labels: enhancement
 - 在相关 PR 中留言讨论
 
 感谢你的贡献！🎉
+
+---
+
+## 开源协议
+
+本项目采用 [Apache License 2.0](LICENSE) 开源许可证。所有提交的代码与贡献均视为同意遵循该协议。
+
