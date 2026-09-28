@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -13,6 +14,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -32,8 +34,8 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = android.graphics.Color.rgb(250, 248, 244)
-        window.navigationBarColor = android.graphics.Color.rgb(250, 248, 244)
+        // 使用官方 enableEdgeToEdge API，在 Android 15+ 上保持一致的沉浸式体验
+        enableEdgeToEdge()
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = true
             isAppearanceLightNavigationBars = true
@@ -58,7 +60,7 @@ private fun ComicApp(repository: ComicRepository) {
     var readerOrigin by rememberSaveable { mutableStateOf("album") }
     val notifications = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val importFeedback by ImportFeedback.message.collectAsState()
+    val importFeedback by ImportFeedback.message.collectAsStateWithLifecycle()
     LaunchedEffect(importFeedback) {
         importFeedback?.let { message ->
             notifications.showSnackbar(message)

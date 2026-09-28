@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,9 +86,9 @@ fun LibraryScreen(
     onRead: (Long) -> Unit,
     notify: (String) -> Unit,
 ) {
-    val loadedAlbums by repository.overviews.collectAsState(initial = null)
+    val loadedAlbums by repository.overviews.collectAsStateWithLifecycle(initialValue = null)
     val albums = loadedAlbums ?: emptyList()
-    val archive by ArchiveStatus.progress.collectAsState()
+    val archive by ArchiveStatus.progress.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()

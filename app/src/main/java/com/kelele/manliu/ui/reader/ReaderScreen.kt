@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +35,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,7 +92,7 @@ fun ReaderScreen(repository: ComicRepository, albumId: Long, onBack: () -> Unit)
 
     val data by remember(albumId) {
         combine(repository.album(albumId), repository.pages(albumId)) { album, pages -> album to pages }
-    }.collectAsState(initial = null)
+    }.collectAsStateWithLifecycle(initialValue = null)
     val loaded = data
     if (loaded == null) {
         Box(Modifier.fillMaxSize().background(BackgroundLight), contentAlignment = Alignment.Center) {
@@ -134,6 +137,9 @@ private fun ReaderContent(
     // 手势缩放与平移状态
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    // 使用 derivedStateOf 隔离缩放阈值判断，避免 scale 每帧变化引发全量重组
+    val isZoomed by remember { derivedStateOf { scale > 1.05f } }
+    val isScrollEnabled by remember { derivedStateOf { scale <= 1.05f } }
 
     // 阅读器背景模式切换：纯黑模式 vs 浅色模式
     var isDarkBackground by rememberSaveable { mutableStateOf(false) }
@@ -177,7 +183,7 @@ private fun ReaderContent(
                 // 单击切换工具栏，双击 1x/2.2x 切换放大
                 detectTapGestures(
                     onDoubleTap = {
-                        if (scale > 1.05f) {
+                        if (isZoomed) {
                             scale = 1f
                             offset = Offset.Zero
                         } else {
@@ -205,7 +211,7 @@ private fun ReaderContent(
     ) {
         LazyColumn(
             state = state,
-            userScrollEnabled = scale <= 1.05f, // 放大模式下禁用列表滚动，优先支持自由平移查看画面细节
+            userScrollEnabled = isScrollEnabled, // 放大模式下禁用列表滚动，优先支持自由平移查看画面细节
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -251,7 +257,7 @@ private fun ReaderContent(
                     color = controlTextColor,
                 )
                 // 若处于放大状态，提供一键重置 1x 按钮
-                if (scale > 1.05f) {
+                if (isZoomed) {
                     Text(
                         "重置",
                         color = Accent,
@@ -278,14 +284,12 @@ private fun ReaderContent(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                // 页码跳转按钮
-                Text(
-                    (state.firstVisibleItemIndex + 1).toString() + " / " + pages.size,
-                    color = Accent,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                        .background(badgeBg).clickable { showJump = true }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                // 页码跳转按钮（独立 Composable 隔离滚动状态读取，避免整个控制栏重组）
+                PageIndicator(
+                    state = state,
+                    totalPages = pages.size,
+                    badgeBg = badgeBg,
+                    onJump = { showJump = true },
                 )
             }
         }
@@ -320,4 +324,30 @@ private fun ReaderContent(
             dismissButton = { TextButton(onClick = { showJump = false }) { Text("取消") } },
         )
     }
+}
+
+/**
+ * 独立的页码指示器 Composable。
+ * 将 [LazyListState.firstVisibleItemIndex] 的读取隔离在此组件内部，
+ * 配合 [derivedStateOf] 确保只有页码数字真正变化时才触发重组，
+ * 避免滚动时整个控制栏被频繁重组。
+ */
+@Composable
+private fun PageIndicator(
+    state: LazyListState,
+    totalPages: Int,
+    badgeBg: Color,
+    onJump: () -> Unit,
+) {
+    val pageText by remember(totalPages) {
+        derivedStateOf { "${state.firstVisibleItemIndex + 1} / $totalPages" }
+    }
+    Text(
+        pageText,
+        color = Accent,
+        style = MaterialTheme.typography.labelMedium,
+        modifier = Modifier.clip(RoundedCornerShape(12.dp))
+            .background(badgeBg).clickable { onJump() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
 }

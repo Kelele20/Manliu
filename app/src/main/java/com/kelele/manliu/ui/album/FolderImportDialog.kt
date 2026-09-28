@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,6 +45,8 @@ import com.kelele.manliu.compareImageNames
 import com.kelele.manliu.ui.theme.Accent
 import com.kelele.manliu.ui.theme.SoftText
 import com.kelele.manliu.ui.theme.SurfaceLight
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 enum class FolderSort(val label: String) {
     NAME_ASC("名称升序（1 → 9）"),
@@ -61,15 +64,19 @@ fun FolderImportDialog(
     var selection by remember { mutableStateOf(emptySet<Uri>()) }
     var sort by remember { mutableStateOf(FolderSort.NAME_ASC) }
     var showSortMenu by remember { mutableStateOf(false) }
-    val sorted = remember(images, sort) {
-        images.sortedWith { first, second ->
-            val byName = compareImageNames(first.name, second.name)
-            when (sort) {
-                FolderSort.NAME_ASC -> byName
-                FolderSort.NAME_DESC -> -byName
-                FolderSort.NEWEST -> {
-                    val byTime = second.modifiedAt.compareTo(first.modifiedAt)
-                    if (byTime != 0) byTime else byName
+    // 异步排序：避免在主线程阻塞排序大列表（可能高达 10000 项）导致 ANR
+    var sorted by remember { mutableStateOf(images) }
+    LaunchedEffect(images, sort) {
+        sorted = withContext(Dispatchers.Default) {
+            images.sortedWith { first, second ->
+                val byName = compareImageNames(first.name, second.name)
+                when (sort) {
+                    FolderSort.NAME_ASC -> byName
+                    FolderSort.NAME_DESC -> -byName
+                    FolderSort.NEWEST -> {
+                        val byTime = second.modifiedAt.compareTo(first.modifiedAt)
+                        if (byTime != 0) byTime else byName
+                    }
                 }
             }
         }

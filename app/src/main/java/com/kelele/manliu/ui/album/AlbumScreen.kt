@@ -50,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,11 +98,11 @@ fun AlbumScreen(
     onRead: () -> Unit,
     notify: (String) -> Unit,
 ) {
-    val album by remember(albumId) { repository.album(albumId) }.collectAsState(initial = null)
-    val loadedPages by remember(albumId) { repository.pages(albumId) }.collectAsState(initial = null)
+    val album by remember(albumId) { repository.album(albumId) }.collectAsStateWithLifecycle(initialValue = null)
+    val loadedPages by remember(albumId) { repository.pages(albumId) }.collectAsStateWithLifecycle(initialValue = null)
     val pages = loadedPages ?: emptyList()
-    val latestImport by remember(albumId) { repository.latestImport(albumId) }.collectAsState(initial = null)
-    val archive by ArchiveStatus.progress.collectAsState()
+    val latestImport by remember(albumId) { repository.latestImport(albumId) }.collectAsStateWithLifecycle(initialValue = null)
+    val archive by ArchiveStatus.progress.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()

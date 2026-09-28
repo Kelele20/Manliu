@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -147,7 +148,7 @@ fun ImportProgressCard(
     }
 
     if (showFailures) {
-        val failed by remember(job.id) { repository.failedImports(job.id) }.collectAsState(initial = emptyList())
+        val failed by remember(job.id) { repository.failedImports(job.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
         AlertDialog(
             onDismissRequest = { showFailures = false },
             title = { Text("失败图片（${job.failed} 张）") },
