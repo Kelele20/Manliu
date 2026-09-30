@@ -94,7 +94,7 @@ java -version
 
 ## 测试情况
 
-- [ ] 已通过全部 11 项现有单元测试
+- [ ] 已通过全部 31 项现有测试
 - [ ] 已为新功能添加对应测试（如适用）
 - [ ] 已在模拟器或真机上验证（如适用）
 
@@ -219,13 +219,17 @@ test(archive): 补充归档容量上限的边界测试
 
 ### 现有测试概览
 
-项目当前包含 **11 项 JVM 单元测试**，分布如下：
+项目当前包含 **31 项 JVM 测试**，包含使用 Robolectric 的 Room、服务与 Compose 回归测试，分布如下：
 
 | 测试类 | 测试数量 | 测试内容 |
 |---|---|---|
 | `ArchiveLimitsTest` | 5 项 | 归档功能的容量限制与边界条件 |
 | `ImportOrderingTest` | 4 项 | 导入功能的排序逻辑 |
 | `ReaderProgressTest` | 2 项 | 阅读进度的计算与持久化 |
+| `ArchiveParserTest` | 4 项 | 压缩包过滤与章节路径自然排序 |
+| `ArchiveExtractionBudgetTest` | 4 项 | 解压数量、大小及空间边界 |
+| `ArchiveImportIntegrationTest` | 10 项 | 真实入库、任务恢复及停止时的清理 |
+| `ImportInteractionTest` | 2 项 | 页面退出和拖拽自动滚动 |
 
 ### 测试规范
 
@@ -260,7 +264,7 @@ fun `导入文件时应按文件名升序排列`() {
 
 | 步骤 | 命令 | 说明 |
 |---|---|---|
-| 单元测试 | `./gradlew :app:testDebugUnitTest` | 运行全部 11 项 JVM 单元测试 |
+| 单元测试 | `./gradlew :app:testDebugUnitTest` | 运行全部 31 项 JVM 测试 |
 | Debug 构建 | `./gradlew :app:assembleDebug` | 构建 Debug APK，验证编译无误 |
 | 完整验证 | `./gradlew :app:testDebugUnitTest :app:assembleDebug` | 一次性执行以上两步 |
 | 清理构建 | `./gradlew clean :app:assembleDebug` | 清理后重新构建，排查缓存问题 |
@@ -377,4 +381,3 @@ labels: enhancement
 ## 开源协议
 
 本项目采用 [Apache License 2.0](LICENSE) 开源许可证。所有提交的代码与贡献均视为同意遵循该协议。
-

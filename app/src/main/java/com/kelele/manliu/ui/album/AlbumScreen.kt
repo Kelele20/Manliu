@@ -184,17 +184,16 @@ fun AlbumScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            importing = true
-            scope.launch {
+            try {
                 try {
-                    repository.createArchiveImport(albumId, uri)
-                    launchImportService()
-                    notify("已开始从漫画压缩包导入图片")
-                } catch (error: Exception) {
-                    notify(error.message ?: "无法解析压缩包")
-                } finally {
-                    importing = false
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: SecurityException) {
+                    // Providers without persistent grants still pass their live grant to the service.
                 }
+                ImportService.startArchive(context, albumId, uri)
+                notify("正在后台解压并导入漫画包")
+            } catch (error: Exception) {
+                notify(error.message ?: "无法开始导入")
             }
         }
     }

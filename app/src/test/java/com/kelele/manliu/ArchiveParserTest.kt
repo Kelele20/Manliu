@@ -1,7 +1,7 @@
 package com.kelele.manliu
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -44,16 +44,7 @@ class ArchiveParserTest {
         ZipInputStream(ByteArrayInputStream(byteOutput.toByteArray())).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
-                val name = entry.name
-                val fileName = name.substringAfterLast('/')
-                val ext = fileName.substringAfterLast('.', "").lowercase()
-                if (!entry.isDirectory &&
-                    !name.contains("__MACOSX") &&
-                    !fileName.startsWith(".") &&
-                    ext in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")
-                ) {
-                    entries.add(fileName)
-                }
+                archiveImagePath(entry.name, entry.isDirectory)?.let(entries::add)
                 zip.closeEntry()
             }
         }
@@ -61,16 +52,29 @@ class ArchiveParserTest {
         // 自然文件名排序
         entries.sortWith { a, b -> compareImageNames(a, b) }
 
-        assertEquals(listOf("1.png", "2.jpg", "10.jpg"), entries)
+        assertEquals(listOf("manga/1.png", "manga/2.jpg", "manga/10.jpg"), entries)
     }
 
     @Test
     fun cbzSupportedExtensionsAreRecognized() {
-        val supported = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")
-        assertTrue(supported.contains("webp"))
-        assertTrue(supported.contains("avif"))
-        assertTrue(supported.contains("png"))
-        assertTrue(!supported.contains("txt"))
-        assertTrue(!supported.contains("exe"))
+        for (extension in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")) {
+            assertEquals("1.$extension", archiveImagePath("1.$extension", false))
+        }
+        assertNull(archiveImagePath("info.txt", false))
+        assertNull(archiveImagePath("program.exe", false))
+    }
+
+    @Test fun hiddenDirectoriesAndTraversalAreFiltered() {
+        assertNull(archiveImagePath(".hidden/1.jpg", false))
+        assertNull(archiveImagePath("../1.jpg", false))
+        assertNull(archiveImagePath("chapter/../../1.jpg", false))
+        assertNull(archiveImagePath("chapter.jpg", true))
+        assertEquals("chapter/1.jpg", archiveImagePath("chapter\\1.jpg", false))
+    }
+
+    @Test fun relativePathsKeepNaturallyNumberedChaptersTogether() {
+        val paths = listOf("chapter10/1.jpg", "chapter2/2.jpg", "chapter1/10.jpg", "chapter2/1.jpg", "chapter1/2.jpg")
+            .sortedWith(::compareImageNames)
+        assertEquals(listOf("chapter1/2.jpg", "chapter1/10.jpg", "chapter2/1.jpg", "chapter2/2.jpg", "chapter10/1.jpg"), paths)
     }
 }
