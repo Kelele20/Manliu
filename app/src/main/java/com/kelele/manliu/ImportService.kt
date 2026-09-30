@@ -39,6 +39,7 @@ class ImportService : Service() {
         private const val NOTIFICATION_ID = 1201
         private const val EXTRA_ALBUM_ID = "albumId"
         private const val EXTRA_URIS = "selectedUris"
+        private const val EXTRA_ARCHIVE_URI = "archiveUri"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, ImportService::class.java))
@@ -54,6 +55,16 @@ class ImportService : Service() {
                 clipData = ClipData.newUri(context.contentResolver, "选中的图片", selected.first()).also { clip ->
                     selected.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
                 }
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun startArchive(context: Context, albumId: Long, uri: Uri) {
+            val intent = Intent(context, ImportService::class.java).apply {
+                putExtra(EXTRA_ALBUM_ID, albumId)
+                putExtra(EXTRA_ARCHIVE_URI, uri.toString())
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = ClipData.newUri(context.contentResolver, "漫画压缩包", uri)
             }
             ContextCompat.startForegroundService(context, intent)
         }
@@ -87,23 +98,25 @@ class ImportService : Service() {
             intent?.getParcelableArrayListExtra(EXTRA_URIS)
         }
         val albumId = intent?.getLongExtra(EXTRA_ALBUM_ID, 0L) ?: 0L
+        val archiveUri = intent?.getStringExtra(EXTRA_ARCHIVE_URI)?.let(Uri::parse)
         scope.launch {
+            // Persist new requests without waiting for an earlier import to finish processing.
+            try {
+                if (archiveUri != null) repository.createArchiveImport(albumId, archiveUri)
+                else if (!selected.isNullOrEmpty()) repository.createSelectedImport(albumId, selected)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                reportFailure(error.message ?: "无法开始导入")
+            }
             processorMutex.withLock {
                 try {
-                    if (!selected.isNullOrEmpty()) {
-                        try {
-                            repository.createSelectedImport(albumId, selected)
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (error: Exception) {
-                            reportFailure(error.message ?: "无法开始导入")
-                        }
-                    }
                     while (true) {
                         if (repository.prepareNextImport { staged, total ->
                                 notifications.notify(
                                     NOTIFICATION_ID,
-                                    notification("正在保存所选图片 $staged / $total", staged, total),
+                                    notification(if (total == 0) "正在解压漫画包，已找到 $staged 张图片"
+                                        else "正在准备图片 $staged / $total", staged, total),
                                 )
                             }) continue
                         val processed = repository.processNextImport { job ->
