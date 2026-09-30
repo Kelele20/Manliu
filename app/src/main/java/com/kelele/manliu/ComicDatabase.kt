@@ -197,8 +197,11 @@ interface ComicDao {
     @Query("SELECT * FROM import_jobs WHERE id = :id LIMIT 1")
     suspend fun findImportJob(id: Long): ImportJob?
 
-    @Query("SELECT folderUri FROM import_jobs WHERE folderUri LIKE 'staged:%'")
+    @Query("SELECT folderUri FROM import_jobs WHERE folderUri LIKE 'staged:%' OR folderUri LIKE 'archive:%'")
     suspend fun stagedImportSources(): List<String>
+
+    @Query("SELECT * FROM import_jobs WHERE albumId = :albumId")
+    suspend fun importJobsForAlbum(albumId: Long): List<ImportJob>
 
     @Query("SELECT * FROM import_jobs WHERE albumId = :albumId AND status IN ('PREPARING', 'QUEUED', 'RUNNING', 'PAUSED') AND processed < total ORDER BY id DESC LIMIT 1")
     suspend fun unfinishedImport(albumId: Long): ImportJob?
@@ -238,6 +241,9 @@ interface ComicDao {
 
     @Query("UPDATE import_jobs SET status = 'QUEUED', message = NULL WHERE id = :taskId AND status = 'PREPARING'")
     suspend fun finishPreparing(taskId: Long): Int
+
+    @Query("UPDATE import_jobs SET folderUri = :source, total = :total, status = 'QUEUED', message = NULL WHERE id = :taskId AND status = 'PREPARING'")
+    suspend fun finishArchivePreparing(taskId: Long, source: String, total: Int): Int
 
     @Query("UPDATE import_jobs SET status = 'DONE', message = :message WHERE id = :taskId AND status = 'RUNNING'")
     suspend fun completeRunningImport(taskId: Long, message: String?): Int

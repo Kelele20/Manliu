@@ -125,8 +125,8 @@ internal class DragReorderState(internal val listState: LazyListState) {
             if (speed != 0f) {
                 val scrolled = listState.scrollBy(speed)
                 if (scrolled != 0f) {
-                    // 视口滚动时，补偿初始基准锚点，保证卡片与手指完全吸合
-                    initialItemOffset -= scrolled.toInt()
+                    // offsetFor already compensates the item's changing layout offset.
+                    // Keep the finger's viewport anchor fixed while the list scrolls underneath it.
                     moveAcrossItems()
                 }
             }

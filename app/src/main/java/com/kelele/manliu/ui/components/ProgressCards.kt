@@ -79,6 +79,7 @@ fun ImportProgressCard(
     notify: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val preparingArchive = job.folderUri.startsWith("archive:")
     var showFailures by remember(job.id) { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 12.dp)
@@ -87,7 +88,7 @@ fun ImportProgressCard(
     ) {
         Text(
             when (job.status) {
-                "PREPARING" -> "正在准备图片"
+                "PREPARING" -> if (preparingArchive) "正在解压漫画包" else "正在准备图片"
                 "RUNNING", "QUEUED" -> "正在导入图片"
                 "PAUSED" -> "导入已暂停"
                 "CANCELLED" -> "导入已取消"
@@ -96,12 +97,17 @@ fun ImportProgressCard(
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(6.dp))
-        LinearProgressIndicator(
-            progress = { job.processed.toFloat() / job.total.coerceAtLeast(1) },
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (preparingArchive) {
+            if (job.status == "PREPARING") LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        } else {
+            LinearProgressIndicator(
+                progress = { job.processed.toFloat() / job.total.coerceAtLeast(1) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Text(
-            "已处理 ${job.processed} / ${job.total} · 成功 ${job.imported} · 失败 ${job.failed}",
+            if (preparingArchive) "漫画包尚未解压完成"
+            else "已处理 ${job.processed} / ${job.total} · 成功 ${job.imported} · 失败 ${job.failed}",
             color = SoftText,
             style = MaterialTheme.typography.bodySmall,
         )
