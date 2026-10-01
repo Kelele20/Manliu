@@ -25,7 +25,7 @@
 | **JDK** | 17（推荐使用 [Eclipse Temurin](https://adoptium.net/) 发行版） |
 | **Android Studio** | 最新稳定版（Hedgehog 或更高） |
 | **Android SDK** | API 35（compileSdk / targetSdk） |
-| **Kotlin** | 项目中 `libs.versions.toml` 指定的版本 |
+| **Kotlin** | 2.0.21，以根目录 `build.gradle.kts` 中的插件版本为准 |
 
 > [!IMPORTANT]
 > 本项目最低支持 **Android 8.0（API 26）**，目标平台为 **Android 15（API 35）**。请确保 SDK Manager 中已安装对应 SDK Platform。
@@ -46,7 +46,10 @@ java -version
 
 ### 签名密钥
 
-开发签名密钥 `manliu-dev-key.keystore` **不包含在仓库中**。如需本地签名构建，请联系项目维护者获取，并将其放置于项目根目录。Debug 构建使用 Android 默认 debug 签名，无需额外配置。
+开发签名密钥 `manliu-dev-key.keystore` **不包含在仓库中**。如需使用项目开发签名，请联系项目维护者获取，并将其放置于项目根目录。
+
+- **Debug 构建**：根目录存在该密钥时使用该密钥；不存在时使用 Android 默认 debug 签名。覆盖安装要求新旧 APK 的签名一致。
+- **Release 构建**：当前未配置签名，`assembleRelease` 生成未签名 APK，安装前需另行签名。将开发密钥放入根目录只影响 Debug 构建，不会自动配置 Release 签名。
 
 ### 关于网络权限
 
@@ -219,7 +222,7 @@ test(archive): 补充归档容量上限的边界测试
 
 ### 现有测试概览
 
-项目当前包含 **31 项 JVM 测试**，包含使用 Robolectric 的 Room、服务与 Compose 回归测试，分布如下：
+项目当前包含 **31 项 JVM 测试**，其中 12 项使用 Robolectric 验证真实 Room、前台服务及 Compose 交互，分布如下：
 
 | 测试类 | 测试数量 | 测试内容 |
 |---|---|---|

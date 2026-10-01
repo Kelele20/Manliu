@@ -17,6 +17,22 @@
 
 ---
 
+## [v0.4.1] - 2026-09-28
+
+### 🔨 性能与架构优化 (Changed)
+
+- 阅读器使用 `derivedStateOf` 隔离缩放阈值判断，并提取独立 `PageIndicator`，减少缩放和滚动时的高频重组。
+- 文件夹导入预览的大列表排序移至 `Dispatchers.Default`，避免排序阻塞界面。
+- UI 层的 Flow 收集改用 `collectAsStateWithLifecycle`，在应用进入后台时停止收集。
+- 主界面采用 `enableEdgeToEdge()` 管理边缘布局。
+- Release 构建启用 R8 代码混淆和资源压缩，新增 ProGuard 规则保留 Room 实体与 DAO，并补充 `lifecycle-runtime-compose` 依赖。
+
+### 🐛 缺陷修复 (Fixed)
+
+- 导入服务销毁时清理全局 `ImportFeedback` 状态残留。
+
+---
+
 ## [v0.4.0] - 2026-09-28
 
 ### ✨ 新增功能 (Added)
